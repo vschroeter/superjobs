@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from superjobs.payload.adapter.implementations.dataclass import DataclassAdapterFactory
 from superjobs.payload.adapter.implementations.pydantic import PydanticAdapterFactory
 from superjobs.payload.adapter.implementations.python import PlainPythonAdapterFactory
+from superjobs.payload.codec.implementations.json import JsonCodec
 from superjobs.payload.codec.implementations.msgpack import MsgpackCodec
 from superjobs.payload.codec.payloadcodec import PayloadCodec
 from superjobs.payload.codec.wirecodec import WireCodec
@@ -20,8 +21,13 @@ class SuperjobsRegistry:
 
         self.default_wire_codec: WireCodec = MsgpackCodec()
 
+        self.media_type_to_wire_codec: dict[str, WireCodec] = {}
+
     def register_adapter(self, adapter: AdapterFactory):
         self.adapters.append(adapter)
+
+    def register_wire_codec(self, wire_codec: WireCodec):
+        self.media_type_to_wire_codec[wire_codec.media_type] = wire_codec
 
     def get_adapter(self, type_: type) -> AdapterFactory:
         if type_ in self._type_cache:
@@ -49,3 +55,10 @@ registry = SuperjobsRegistry()
 registry.register_adapter(PydanticAdapterFactory())
 registry.register_adapter(DataclassAdapterFactory())
 registry.register_adapter(PlainPythonAdapterFactory())
+
+###############################################################################################
+# Default wire codecs
+###############################################################################################
+
+registry.register_wire_codec(MsgpackCodec())
+registry.register_wire_codec(JsonCodec())
