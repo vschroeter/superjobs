@@ -24,7 +24,8 @@ class PlainPythonPayloadAdapter[T](PayloadAdapter[T]):
         self._adapter = pydantic.TypeAdapter(type_)
 
     def dump(self, value: T) -> WireValue:
-        return self._adapter.dump_python(value, mode="json")
+        validated = self._adapter.validate_python(value)
+        return self._adapter.dump_python(validated, mode="json")
 
     def load(self, value: WireValue) -> T:
         return self._adapter.validate_python(value)

@@ -1,19 +1,27 @@
-# import functools
-
-# class A:
-
-#     def handler(self, fct):
-
-#         @functools.wraps(fct)
-#         def wrapper(self, *args, **kwargs):
-#             return fct(self, *args, **kwargs)
-#         return wrapper
-
-#         pass
+class A:
+    def __init__(self):
+        self.a = 1
 
 
-# a = A()
+class B:
+    def __init__(self):
+        self.b = 2
 
 
-# @a.handler
-# async def generate(request, context):
+def main():
+
+    a = A()
+    a.a = 5
+
+    match a:
+        case A(a=1):
+            print("A with a=1")
+        case A():
+            print("A")
+
+        case B():
+            print("B")
+
+
+if __name__ == "__main__":
+    main()

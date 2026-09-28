@@ -12,6 +12,7 @@ class Delivery(Protocol):
         self,
         *,
         delay: timedelta | None = None,
+        attempt: int | None = None,
     ) -> None: ...
 
     async def reject(

@@ -55,18 +55,52 @@ class Transport:
                     stream_info = await jetstream.stream_info(stream.name)
 
             current_subjects = list(stream_info.config.subjects or ())
-            new_subjects = [subject for subject in stream.subjects if not any(self._subject_matches(subject, current_subject) for current_subject in current_subjects)]
-
+            new_subjects = [
+                subject
+                for subject in stream.subjects
+                if not any(
+                    self._subject_matches(subject, current_subject)
+                    for current_subject in current_subjects
+                )
+            ]
+            changed = False
             if new_subjects:
                 stream_info.config.subjects = [*current_subjects, *new_subjects]
+                changed = True
+
+            for attribute in (
+                "max_age",
+                "max_bytes",
+                "max_msgs",
+                "max_msgs_per_subject",
+            ):
+                desired = getattr(stream.config, attribute)
+                if desired is None or desired == -1:
+                    continue
+                if getattr(stream_info.config, attribute) != desired:
+                    setattr(stream_info.config, attribute, desired)
+                    changed = True
+
+            if changed:
                 await jetstream.update_stream(config=stream_info.config)
 
-    def consumer_name(self, source: Source) -> str | None:
-        if not self.queue_config.durable:
+    def consumer_name(
+        self,
+        source: Source,
+        *,
+        durable: bool | None = None,
+    ) -> str | None:
+        if durable is None:
+            durable = self.queue_config.durable
+        if not durable:
             return None
 
         consumer_key = "\0".join(
-            (source.stream, self.queue_config.consumer_group, source.name),
+            (
+                source.stream,
+                "default",
+                source.name,
+            ),
         )
         digest = sha256(consumer_key.encode("utf-8")).hexdigest()[:32]
         return f"sj-{digest}"
@@ -164,9 +198,31 @@ class Transport:
 
         return pub
 
-    async def create_subscriber(self, source: Source, *, start: bool = True):
+    async def create_subscriber(
+        self,
+        source: Source,
+        *,
+        start: bool = True,
+        durable: bool | None = None,
+    ):
+        return await self._create_subscriber(
+            source,
+            start=start,
+            durable=durable,
+        )
+
+    async def _create_subscriber(
+        self,
+        source: Source,
+        *,
+        start: bool = True,
+        durable: bool | None = None,
+    ):
         stream = JStream(name=source.stream, subjects=[source.name])
-        consumer_name = self.consumer_name(source)
+        consumer_name = self.consumer_name(
+            source,
+            durable=durable,
+        )
 
         if start:
             await self._ensure_stream(stream)
