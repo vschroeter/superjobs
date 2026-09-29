@@ -1,0 +1,15 @@
+{
+  "include": [
+    "check_types.py",
+    "../../producer.py",
+    "../../worker_handlers.py"
+  ],
+  "extraPaths": [
+    "../../../../src",
+    "../../superjobs_contract_example/src"
+  ],
+  "venvPath": "../../../..",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic"
+}

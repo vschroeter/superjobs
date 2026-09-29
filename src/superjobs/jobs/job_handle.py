@@ -72,7 +72,7 @@ class JobHandle[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
             )
         raise RuntimeError(f"Job {self.id} did not reach a terminal state")
 
-    async def outcome(self, *, wait_timeout: float | None = None) -> JobOutcome:
+    async def outcome(self, *, wait_timeout: float | None = None) -> JobOutcome[FinalT]:
         _validate_wait_timeout(wait_timeout)
         record = await self._get_record()
         if record.state not in _TERMINAL_STATES:

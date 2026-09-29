@@ -8,6 +8,10 @@ The domain language for defining, submitting, and observing durable background j
 A hierarchically named contract with an immutable version describing the request, result, and optional intermediate event types for an operation.
 _Avoid_: Job execution, attempt
 
+**Contract package**:
+A shared Python package containing Job definitions and their request, result, and optional intermediate event types, usable by producers and workers independently of worker implementation code.
+_Avoid_: Worker package, job handler
+
 **Job execution**:
 One accepted submission of a Job, with a stable identity across its lifetime and any retries.
 _Avoid_: Job, attempt, task
