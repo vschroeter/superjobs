@@ -28,15 +28,16 @@ def register_contract_handlers(jobs: SuperJobs) -> None:
         await context.emit(ManifestEvent(stage="published"))
         return ManifestResult(revision=f"{request.device_id}-r1")
 
-    @jobs.handler(MANIFEST_NO_EVENTS_JOB)
-    async def manifest_no_events(
+    async def manifest_no_events_impl(
         request: ManifestNoEventsRequest,
         context: JobContext[None],
     ) -> ManifestNoEventsResult:
         await context.log(f"accepted bundle {request.bundle_id}")
         return ManifestNoEventsResult(accepted=True)
 
-    @jobs.handler(TELEMETRY_INGEST_JOB)
+    jobs.register(MANIFEST_NO_EVENTS_JOB, manifest_no_events_impl)
+
+    @TELEMETRY_INGEST_JOB.handler
     async def telemetry_ingest(
         request: TelemetrySample,
         context: JobContext[None],
@@ -44,7 +45,11 @@ def register_contract_handlers(jobs: SuperJobs) -> None:
         await context.log(f"telemetry {request.metric}={request.value}")
         return None
 
-    @jobs.handler(HEARTBEAT_JOB)
+    jobs.register(telemetry_ingest)
+
+    @HEARTBEAT_JOB.handler
     async def heartbeat(context: JobContext[None]) -> HeartbeatResult:
         await context.log("heartbeat")
         return HeartbeatResult(ok=True)
+
+    jobs.register(heartbeat)

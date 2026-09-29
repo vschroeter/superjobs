@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
-from collections.abc import Callable
-from typing import Any, TypeVar
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar, overload
 
 from faststream.nats import NatsBroker
 
+from superjobs.jobs.handler_binding import (
+    ensure_marked_job,
+    validate_handler_job_association,
+    validate_handler_signature,
+)
+from superjobs.jobs.handler_decorators import (
+    RuntimeHandlerDecorator,
+    RuntimeNoRequestHandlerDecorator,
+)
 from superjobs.jobs.job import Job
 from superjobs.jobs.job_client import JobClient
-from superjobs.jobs.job_context import ObservationPolicy
+from superjobs.jobs.job_context import JobContext, ObservationPolicy
 from superjobs.jobs.job_handler import JobHandler
 from superjobs.jobs.retention import ObservationRetention, ResultRetention
 from superjobs.jobs.retry_policy import RetryPolicy
@@ -134,6 +142,28 @@ class SuperJobs:
     async def __aexit__(self, exception_type, exception, traceback) -> None:
         await self.stop()
 
+    @overload
+    def handler(
+        self,
+        job: Job[None, FinalT, InterT],
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> RuntimeNoRequestHandlerDecorator[FinalT, InterT]: ...
+
+    @overload
+    def handler(
+        self,
+        job: Job[ReqT, FinalT, InterT],
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> RuntimeHandlerDecorator[ReqT, FinalT, InterT]: ...
+
     def handler(
         self,
         job: Job[Any, Any, Any],
@@ -142,51 +172,201 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
-    ):
-        def decorator(callback: Callable[..., Any]) -> Callable[..., Any]:
-            self._validate_callback(job, callback)
-            register_job = getattr(self.transport, "register_job", None)
-            if register_job is not None:
-                register_job(job)
-            handler = JobHandler(
+    ) -> RuntimeHandlerDecorator[Any, Any, Any] | RuntimeNoRequestHandlerDecorator[Any, Any]:
+        if job.request_type is None:
+            return RuntimeNoRequestHandlerDecorator(
+                self,
                 job,
-                callback,
-                backend=self.transport,
                 concurrency=concurrency,
                 retry=retry,
-                observation_policy=observation_policy or self.observation_policy,
+                observation_policy=observation_policy,
                 heartbeat_interval=heartbeat_interval,
             )
-            key = job.canonical_name
-            if key in self._handlers:
-                raise ValueError(f"A handler is already registered for {job}")
-            self._handlers[key] = handler
-            if self._started:
-                handler.schedule_start()
-            return callback
-
-        return decorator
+        return RuntimeHandlerDecorator(
+            self,
+            job,
+            concurrency=concurrency,
+            retry=retry,
+            observation_policy=observation_policy,
+            heartbeat_interval=heartbeat_interval,
+        )
 
     # Compatibility alias for the original sketch while callers migrate.
     handle = handler
 
+    @overload
+    def register(
+        self,
+        job: Job[None, FinalT, InterT],
+        callback: Callable[[JobContext[InterT]], Coroutine[Any, Any, FinalT]],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        job: Job[None, FinalT, InterT],
+        callback: Callable[[JobContext[InterT]], FinalT],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        job: Job[ReqT, FinalT, InterT],
+        callback: Callable[[ReqT, JobContext[InterT]], Coroutine[Any, Any, FinalT]],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        job: Job[ReqT, FinalT, InterT],
+        callback: Callable[[ReqT, JobContext[InterT]], FinalT],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        marked_callback: Callable[[JobContext[InterT]], Coroutine[Any, Any, FinalT]],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        marked_callback: Callable[[JobContext[InterT]], FinalT],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        marked_callback: Callable[[ReqT, JobContext[InterT]], Coroutine[Any, Any, FinalT]],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        marked_callback: Callable[[ReqT, JobContext[InterT]], FinalT],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> None: ...
+
+    def register(
+        self,
+        job_or_marked: Job[Any, Any, Any] | Callable[..., Any],
+        callback: Callable[..., Any] | None = None,
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> None:
+        if callback is not None:
+            if not isinstance(job_or_marked, Job):
+                raise TypeError("First argument must be a Job when registering a handler")
+            self._register_handler(
+                job_or_marked,
+                callback,
+                concurrency=concurrency,
+                retry=retry,
+                observation_policy=observation_policy,
+                heartbeat_interval=heartbeat_interval,
+            )
+            return
+
+        marked = job_or_marked
+        if isinstance(marked, Job):
+            raise TypeError(
+                "Pass a handler callable decorated with @job.handler, or call "
+                "register(job, handler)",
+            )
+        job = ensure_marked_job(marked)
+        self._register_handler(
+            job,
+            marked,
+            concurrency=concurrency,
+            retry=retry,
+            observation_policy=observation_policy,
+            heartbeat_interval=heartbeat_interval,
+        )
+
     def client(self, job: Job[ReqT, FinalT, InterT]) -> JobClient[ReqT, FinalT, InterT]:
         return JobClient(job, self.transport)
 
-    @staticmethod
-    def _validate_callback(job: Job[Any, Any, Any], callback: Callable[..., Any]) -> None:
-        signature = inspect.signature(callback)
-        positional = [
-            parameter
-            for parameter in signature.parameters.values()
-            if parameter.kind
-            in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            )
-        ]
-        expected = 1 if job.request_type is None else 2
-        if len(positional) < expected:
-            raise TypeError(
-                f"Handler for {job} must accept {expected} positional arguments",
-            )
+    def _register_handler(
+        self,
+        job: Job[Any, Any, Any],
+        callback: Callable[..., Any],
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+    ) -> None:
+        validate_handler_job_association(job, callback)
+        validate_handler_signature(job, callback)
+        key = job.canonical_name
+        if key in self._handlers:
+            raise ValueError(f"A handler is already registered for {job}")
+
+        handler = JobHandler(
+            job,
+            callback,
+            backend=self.transport,
+            concurrency=concurrency,
+            retry=retry,
+            observation_policy=observation_policy or self.observation_policy,
+            heartbeat_interval=heartbeat_interval,
+        )
+
+        register_job = getattr(self.transport, "register_job", None)
+        if register_job is not None:
+            register_job(job)
+
+        self._handlers[key] = handler
+        if self._started:
+            handler.schedule_start()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from superjobs.jobs.handler_decorators import job_handler_descriptor
 from superjobs.jobs.job_identity import JobIdentity
 from superjobs.payload.codec.payloadcodec import PayloadCodec
 from superjobs.registry import registry
@@ -102,3 +103,5 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
 
     def __repr__(self) -> str:
         return f"Job({self.canonical_name})"
+
+    handler = job_handler_descriptor

@@ -59,7 +59,17 @@ Configs include:
 
 **Include:** `check_types.py`, `../../producer.py`, `../../worker_handlers.py`.
 
-**Expected:** zero errors. Covers contract `Job[...]` shapes, `submit` / `result` / `await handle`, reconstructed `get` handle, no-event and no-result jobs, `event.data` narrowing after `isinstance`, and `outcome()` typing (`JobOutcome[FinalT]`, `JobSucceeded` / failure / cancellation narrowing, including `JobOutcome[None]` for no-result jobs).
+**Expected:** zero errors. Covers contract `Job[...]` shapes, `submit` / `result` / `await handle`, reconstructed `get` handle, no-event and no-result jobs, `event.data` narrowing after `isinstance`, `outcome()` typing (`JobOutcome[FinalT]`, `JobSucceeded` / failure / cancellation narrowing, including `JobOutcome[None]` for no-result jobs), and all three handler registration forms.
+
+**Handler typing verified in positive:**
+
+| Area | Verified |
+| --- | --- |
+| `@jobs.handler(job)`, `jobs.register(job, fn)`, `@job.handler` + `jobs.register(marked)` | Request/context/result shapes for sync and async handlers |
+| Decorated callable signature | Original parameter names, positional/keyword calls, defaults and optional extra parameters; original sync/async return type, including a narrower result subclass |
+| No-request jobs (`Job[None, ...]`) | Context-only handlers via runtime and metadata decorators |
+
+Two overloads in a callback protocol have separate roles: one checks that the runtime can call the handler with the contract's arguments, while the other captures its full `ParamSpec` and return type. Both decorators return the original function object. Positive fixtures contain no casts, `Any` annotations, or diagnostic suppression.
 
 ### Negative (`typing/negative`)
 
@@ -69,7 +79,17 @@ Configs include:
 | --- | --- |
 | `submit("not a manifest request")` | `reportArgumentType` |
 | `context.emit("not an event")` | `reportArgumentType` |
-| Incompatible `@jobs.handler` registration | **no** error today (measured gap) |
+| Wrong request/context/result on `@jobs.handler` | `reportArgumentType` |
+| Wrong request/context/result on `jobs.register(job, handler)` (one mismatch each) | `reportCallIssue` and `reportArgumentType` |
+| Wrong request/context/result on `@job.handler` | `reportArgumentType` |
+| Incompatible marked handler | `reportArgumentType` at `@job.handler`; metadata registration relies on that check |
+| Missing context on `@jobs.handler` | `reportArgumentType` |
+| Wrong no-request shape (`request: None`, correct context/result) on `@jobs.handler`, `@job.handler` | `reportArgumentType` |
+| Extra required handler argument on either decorator | `reportArgumentType` |
+| Incorrect request/optional parameter on a directly called decorated function | `reportArgumentType` |
+| Unknown keyword on a directly called decorated function | `reportCallIssue` |
+
+`jobs.register(HEARTBEAT_JOB, …)` with a request-bearing callback is **not** listed here: Pyright 1.1.414 does not emit `reportArgumentType` for that call (runtime still rejects it). See [measured gaps](#measured-gaps-typingmeasured_gaps).
 
 Run Pyright with failure on diagnostics, e.g. `pyright --outputjson` and assert error count for the deliberate mistakes only.
 
@@ -80,7 +100,7 @@ Probes record **EXPECTED** product targets vs **MEASURED** Pyright 1.1.414 (basi
 | Probe | EXPECTED (target) | MEASURED (baseline) |
 | --- | --- | --- |
 | `reveal_type(Job(..., request=..., result=...))` without `event=` | `Job[..., ..., None]` or explicit “no events” | `Job[..., ..., Unknown]` |
-| `reveal_type` on function returned by `@jobs.handler` | Preserved async callable type | `(...) -> Any` |
+| `jobs.register(HEARTBEAT_JOB, fn)` with `(request: None, context: …)` callback | `reportArgumentType` (handler mismatch) | No static diagnostic; `TypeError` at runtime (`validate_handler_signature`) |
 
 ## Wheel build and producer-only install (isolated from source layout)
 
