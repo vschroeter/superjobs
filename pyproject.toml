@@ -26,5 +26,6 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 markers = [
-    "nats: tests requiring a live NATS JetStream server",
+    "nats: integration tests requiring a live NATS JetStream server (fail when unavailable)",
+    "contract_typing: contract-interface Pyright gate and wheel-origin checks (select with -m contract_typing)",
 ]

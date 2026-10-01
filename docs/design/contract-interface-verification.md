@@ -1,5 +1,8 @@
 # Contract interface verification
 
+This is a historical baseline. Current automated source/wheel results are recorded in
+[Automated consumer typing verification](consumer-typing-verification.md).
+
 Measured by Codex on 2026-09-29, library branch `api_design`, commit `d9bdcad`. Cursor Composer 2.5 created the examples and applied targeted corrections; Codex independently reviewed and verified them. No library implementation or root dependency configuration changed. Existing local changes were preserved.
 
 ## Results
@@ -27,7 +30,16 @@ The isolated environment installed SuperJobs 0.1.0 and shared contract example 0
 
 Build/install instructions are in [the example README](../../examples/contract_interface/README.md). Consumer checks used non-editable wheel installs and no source `extraPaths`. ZIP inspection confirmed `superjobs_contract_example/py.typed` in the shared contract wheel.
 
-Source checks from the repository root:
+Automated contract typing verification (source + installed wheels, marker multisets, runtime copies):
+
+```powershell
+python tools/verify_contract_typing.py --python 3.12 --python 3.14
+python tools/verify_contract_typing.py --evidence C:\path\to\evidence
+python -m pytest -m "not nats and not contract_typing" -q
+python -m pytest -m contract_typing -q
+```
+
+Pyright remains pinned at **1.1.414** inside the runner. Manual per-suite commands remain useful while iterating:
 
 ```powershell
 .venv/Scripts/python.exe -m pytest -m 'not nats' -q -p no:cacheprovider

@@ -1,5 +1,5 @@
+import uuid
 import asyncio
-import os
 
 import pytest
 from pydantic import BaseModel
@@ -20,16 +20,10 @@ class Result(BaseModel):
 
 @pytest.mark.nats
 @pytest.mark.asyncio
-async def test_nats_cancellation_is_cooperative() -> None:
-    from faststream.nats import NatsBroker
-
-    jobs = SuperJobs(
-        broker=NatsBroker(
-            os.getenv("NATS_URL", "nats://localhost:4222"),
-            connect_timeout=1,
-        ),
-    )
-    job = Job("tests.nats.cancel", version="v1", request=Request, result=Result)
+async def test_nats_cancellation_is_cooperative(nats_broker, nats_queue_config) -> None:
+    test_id = uuid.uuid4().hex
+    jobs = SuperJobs(broker=nats_broker, queue_config=nats_queue_config)
+    job = Job(f"tests.nats.cancel.{test_id}", version="v1", request=Request, result=Result)
     started = asyncio.Event()
 
     @jobs.handler(job)
@@ -39,11 +33,7 @@ async def test_nats_cancellation_is_cooperative() -> None:
             await context.check_cancelled()
             await asyncio.sleep(0.01)
 
-    try:
-        await jobs.start()
-    except Exception as exception:
-        pytest.skip(f"NATS/JetStream is unavailable: {exception}")
-
+    await jobs.start()
     try:
         handle = await jobs.client(job).submit(Request(value=1))
         await started.wait()

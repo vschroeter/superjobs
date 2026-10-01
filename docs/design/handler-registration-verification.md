@@ -1,6 +1,6 @@
 # Handler registration: implementation and independent verification
 
-Work for [Type handler registration and add explicit and contract-owned forms](https://github.com/vschroeter/superjobs/issues/7), following the confirmed [contract/handler decision](https://github.com/vschroeter/superjobs/issues/4). The earlier design/examples/outcome iteration is committed as `b75616a`. This registration iteration remains local and uncommitted.
+Work for [Type handler registration and add explicit and contract-owned forms](https://github.com/vschroeter/superjobs/issues/7), following the confirmed [contract/handler decision](https://github.com/vschroeter/superjobs/issues/4). The earlier design/examples/outcome iteration is committed as `b75616a`; the original registration implementation is committed as `ef6369f`. The final typing-boundary correction below is included in the verification foundation update.
 
 ## Implemented interface
 
@@ -46,13 +46,34 @@ Fresh library and shared-contract wheels were installed without editable package
 
 Runtime tests cover every registration path, sync and async execution, no-request/no-result behavior, callable identity/defaults, metadata-only decoration, separate runtimes, duplicate/conflicting bindings, invalid signatures/options before backend mutation, and existing dynamic registration/lifecycle behavior. The underlying JobHandler and transports remain unchanged. No NATS rerun or Python 3.12 runtime execution is claimed for this registration slice.
 
-## Remaining acceptance criterion
+## Maintainer-selected typing boundary (2026-10-01)
 
-`jobs.register(no_request_job, two_argument_handler)` can still match the general `Job[ReqT, ...]` overload when `ReqT` is `None`. Pyright therefore accepts the deliberately wrong `(request: None, context: JobContext[None]) -> HeartbeatResult` callback on the explicit form. Both decorators reject the same shape statically, and runtime validation rejects it on every form before registration.
+Checked handler registration requires an inferred `Job(...)` specialization or an explicit `RequestJob[Request, Result, Event, ...]` / `NoRequestJob[Result, Event]` annotation. A deliberately widened base `Job[Request, Result, Event]` remains useful for explicit-object producer clients through `jobs.client(job)`, but must not provide checked registration on `@jobs.handler`, `jobs.register(job, handler)`, or `@job.handler`. Registration overloads use only the request/no-request specializations; there is no base-`Job` registration overload.
 
-This is a measured gap in `typing/measured_gaps`, not a waived requirement or completed static guarantee. Issue #7 remains open until the Job/constructor typing follow-up can represent request presence sufficiently to reject that general-overload fallback. Omitted-payload inference, keyword submission, SubmitOptions, strict payload policy, fingerprints/manifest and sync producer convenience remain separate scopes selected in #4.
+The former no-request `jobs.register` gap through a general `Job[None, ...]` overload is closed for inferred and explicitly annotated `NoRequestJob` values. Deliberately widened base `Job` values are rejected by static checks on all three registration forms; negative fixtures cover request and no-request shapes for runtime decoration, explicit `register(job, handler)`, and metadata `@job.handler`. Constructor keyword erasure on widened jobs remains in `typing/measured_gaps`. Omitted-payload inference, keyword submission, SubmitOptions, strict payload policy, fingerprints/manifest and sync producer convenience remain separate scopes selected in #4.
 
-Update, 2026-10-01: The producer interface in [issue #8](https://github.com/vschroeter/superjobs/issues/8) introduces inferred request/no-request Job specializations. The explicit no-request registration negative control is now rejected by Pyright. The historical measurements above describe the earlier #7 iteration; current results and the remaining base-Job typing limit are recorded in [producer constructor verification](producer-interface-verification.md).
+The producer slice's earlier measurements are recorded in [producer constructor verification](producer-interface-verification.md). The measurements above remain historical; the final boundary was checked independently as follows.
+
+## Final independent verification (2026-10-01)
+
+Cursor Composer 2.5 removed the general `Job` descriptor overload and extended public consumer fixtures. Codex rejected its first attempt, which introduced unchecked `Any` decorators, and requested the corrected presence-aware policy and stronger negative controls. The final library change only removes a descriptor overload; runtime registration, callable identity, and transport behavior are unchanged.
+
+Pyright **1.1.414**, basic mode, **Python 3.12 target**:
+
+| Check | Result |
+| --- | --- |
+| Source typing modules and public positive consumers | Zero errors and warnings |
+| Installed-wheel public positive consumers | Zero errors and warnings |
+| Public negative consumers, source and wheel | 46 intended diagnostics with identical rules and locations |
+| Producer consumers, source and wheel | Zero positive diagnostics; 17 matching intended negative diagnostics |
+| Strict-payload consumers, source and wheel | Zero positive diagnostics; one matching intended negative diagnostic |
+| Deterministic suite on Python 3.13.5 | 234 passed; seven NATS tests deselected |
+| Installed-wheel registration, public API, and outcome tests on Python 3.12.11 | 27 passed |
+| Diff whitespace check | Passed |
+
+The negative controls cover missing context, wrong no-request arity, extra required arguments, and all six combinations of widened request/no-request Jobs and registration forms. Widened-Job controls use otherwise valid callbacks and function parameters that prevent narrowing back to a specialization. Every negative function was checked for diagnostics at the intended call or decorator site; missing-import failures were excluded. Positive fixtures retain checked request/event/result and outcome behavior and contain no casts, `Any` annotations, or suppression.
+
+Both rebuilt distributions were installed into an isolated Python 3.12 environment. Wheel consumer configs use empty `extraPaths`; runtime imports and `py.typed` markers were verified under `site-packages`, with no worker handler module available to the producer import check. Source and wheel diagnostics were compared exactly. No new NATS run is claimed: this correction changes only static descriptor overload selection, and the existing deterministic registration/execution tests pass against both source and the installed distribution.
 
 ## Reproduction
 

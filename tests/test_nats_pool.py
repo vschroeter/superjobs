@@ -1,5 +1,5 @@
+import uuid
 import asyncio
-import os
 
 import pytest
 from pydantic import BaseModel
@@ -18,18 +18,12 @@ class Result(BaseModel):
 
 @pytest.mark.nats
 @pytest.mark.asyncio
-async def test_nats_runtimes_share_the_default_load_balanced_pool() -> None:
-    from faststream.nats import NatsBroker
-
-    url = os.getenv("NATS_URL", "nats://localhost:4222")
-    first_runtime = SuperJobs(
-        broker=NatsBroker(url, connect_timeout=1),
-    )
-    second_runtime = SuperJobs(
-        broker=NatsBroker(url, connect_timeout=1),
-    )
-    first_job = Job("tests.nats.pool", version="v1", request=Request, result=Result)
-    second_job = Job("tests.nats.pool", version="v1", request=Request, result=Result)
+async def test_nats_runtimes_share_the_default_load_balanced_pool(nats_broker_factory, nats_queue_config) -> None:
+    test_id = uuid.uuid4().hex
+    first_runtime = SuperJobs(broker=nats_broker_factory(), queue_config=nats_queue_config)
+    second_runtime = SuperJobs(broker=nats_broker_factory(), queue_config=nats_queue_config)
+    first_job = Job(f"tests.nats.pool.{test_id}", version="v1", request=Request, result=Result)
+    second_job = Job(f"tests.nats.pool.{test_id}", version="v1", request=Request, result=Result)
     calls = {"first": 0, "second": 0}
 
     @first_runtime.handler(first_job)
@@ -44,14 +38,8 @@ async def test_nats_runtimes_share_the_default_load_balanced_pool() -> None:
         await asyncio.sleep(0.005)
         return Result(value=request.value)
 
-    try:
-        await first_runtime.start()
-        await second_runtime.start()
-    except Exception as exception:
-        await first_runtime.stop()
-        await second_runtime.stop()
-        pytest.skip(f"NATS/JetStream is unavailable: {exception}")
-
+    await first_runtime.start()
+    await second_runtime.start()
     try:
         handles = [
             await first_runtime.client(first_job).submit(Request(value=value))

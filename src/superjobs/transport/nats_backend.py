@@ -13,7 +13,7 @@ import msgpack
 from faststream.nats import JStream, NatsBroker
 from faststream.nats.subscriber.usecases import LogicSubscriber
 from nats.js.api import KeyValueConfig
-from nats.js.errors import APIError, NotFoundError
+from nats.js.errors import APIError, NoKeysError, NotFoundError
 
 from superjobs.exceptions.jobs import (
     IdempotencyConflictError,
@@ -283,7 +283,11 @@ class NatsJobBackend(JobBackend):
         completion_kv = self._completion_kv
         if completion_kv is None:
             return
-        for key in await completion_kv.keys():
+        try:
+            keys = await completion_kv.keys()
+        except NoKeysError:
+            keys = ()
+        for key in keys:
             try:
                 entry = await completion_kv.get(key)
             except NotFoundError:

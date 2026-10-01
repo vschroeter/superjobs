@@ -9,7 +9,7 @@ Runnable sketch for shared **contract packages**, producer/worker split, and mea
 | In-memory demo | Installed `superjobs` (repo `src/` or wheel), contract on `PYTHONPATH` (see below) |
 | `pytest` source test | Same; **no** `pip install` of the contract during the test |
 | Pyright suites | Project `.venv` with `superjobs` dependencies; `extraPaths` point at repo `src/` and `superjobs_contract_example/src/` (no editable contract install required) |
-| Wheel consumer typing | Editable or wheel install of `superjobs_contract_example` (verified outside `tests/test_contract_interface_example.py`; see [issue 5](https://github.com/vschroeter/superjobs/issues/5)) |
+| Wheel consumer typing | Non-editable wheel install of `superjobs_contract_example` (see `python tools/verify_contract_typing.py`; [issue 5](https://github.com/vschroeter/superjobs/issues/5)) |
 | NATS producer/worker | `NATS_URL`, `faststream[nats]`, running NATS broker |
 
 ## Source-layout demo (no contract `pip install`)
@@ -36,6 +36,25 @@ python -m pytest tests/test_contract_interface_example.py -q
 
 - `test_in_memory_contract_interface_demo` runs the demo via `sys.executable` and appends contract **source** (`superjobs_contract_example/src`) plus `examples/contract_interface` to `PYTHONPATH` for the child process only.
 - `test_contract_package_public_imports` uses `pytest` `monkeypatch.syspath_prepend` for contract **source** imports (not from an installed wheel).
+
+## Automated source and wheel typing verification
+
+From the repository root:
+
+```powershell
+python tools/verify_contract_typing.py
+```
+
+- **Source mode** checks the typing suites against repository `src/` and contract sources via generated `extraPaths`, using a fresh isolated dependency environment (or `--source-venv`) — not the repository `.venv`.
+- **Wheel mode** builds non-editable `superjobs` and `superjobs_contract_example` wheels into a temporary work directory **outside** the repository, installs them into fresh `uv` virtual environments (default runtimes **3.12** and **3.14**), asserts `site-packages` origins (`py.typed`, no editable installs; local wheel `direct_url.json` allowed), runs copied `tests/test_handler_registration.py` and `tests/test_public_api.py`, and re-runs the typing suites with **no** source `extraPaths` and `autoSearchPaths: false`.
+- **Both mode** (default) builds wheels once, uses the same **3.12** wheel-installed environment for source (`extraPaths`) and wheel typing, and requires matching negative diagnostics.
+- Pyright is pinned to **1.1.414** (`basic`, static Python **3.12**). Negative controls use inline `# expect: <rule>` markers at each deliberate misuse site; the runner compares normalized `(file, line, rule)` multisets and requires source/wheel agreement.
+- Optional evidence: `python tools/verify_contract_typing.py --evidence C:\path\to\evidence` (writes Pyright JSON, origin-probe output, and metadata; temporary work directories are removed unless `--keep-work`).
+- Fast pytest selection (no wheel build, no Pyright subprocess): `python -m pytest -m "not nats and not contract_typing" -q`
+- Contract typing gate (full runner): `python -m pytest -m contract_typing -q` or `python tools/verify_contract_typing.py --python 3.12 --python 3.14`
+- Upgrade the checker only by changing `PYRIGHT_VERSION` in `tools/verify_contract_typing.py` and refreshing markers after review.
+
+`typing/measured_gaps` remains a documented probe suite and is **not** part of this gate.
 
 ## Pyright (source paths, no editable contract install)
 
@@ -69,9 +88,9 @@ Configs include:
 
 | Area | Verified |
 | --- | --- |
-| `@jobs.handler(job)`, `jobs.register(job, fn)`, `@job.handler` + `jobs.register(marked)` | Request/context/result shapes for sync and async handlers |
+| `@jobs.handler(job)`, `jobs.register(job, fn)`, `@job.handler` + `jobs.register(marked)` | Request/context/result shapes for sync and async handlers, including explicit `RequestJob` / `NoRequestJob` metadata decoration |
 | Decorated callable signature | Original parameter names, positional/keyword calls, defaults and optional extra parameters; original sync/async return type, including a narrower result subclass |
-| No-request jobs (`Job[None, ...]`) | Context-only handlers via runtime and metadata decorators |
+| No-request jobs (inferred or `NoRequestJob[...]`) | Context-only handlers via runtime and metadata decorators |
 
 Two overloads in a callback protocol have separate roles: one checks that the runtime can call the handler with the contract's arguments, while the other captures its full `ParamSpec` and return type. Both decorators return the original function object. Positive fixtures contain no casts, `Any` annotations, or diagnostic suppression.
 
@@ -87,7 +106,10 @@ Two overloads in a callback protocol have separate roles: one checks that the ru
 | Wrong request/context/result on `jobs.register(job, handler)` (one mismatch each) | `reportCallIssue` and `reportArgumentType` |
 | Wrong request/context/result on `@job.handler` | `reportArgumentType` |
 | Incompatible marked handler | `reportArgumentType` at `@job.handler`; metadata registration relies on that check |
-| Missing context on `@jobs.handler` | `reportArgumentType` |
+| Missing context on `@jobs.handler`, `jobs.register(job, handler)`, or `@job.handler` (request jobs) | `reportArgumentType` |
+| Zero-argument no-request handler on `@jobs.handler`, `jobs.register(job, handler)`, or `@job.handler` | `reportArgumentType` |
+| Widened base `Job[Request, Result, Event]` or `Job[None, Result, Event]` with otherwise valid handlers | `reportArgumentType` and `reportCallIssue` for runtime forms; `reportAttributeAccessIssue` for metadata decoration |
+| Extra required handler argument on `jobs.register(job, handler)` | `reportArgumentType` |
 | Wrong no-request shape (`request: None`, correct context/result) on `@jobs.handler`, `@job.handler` | `reportArgumentType` |
 | Extra required handler argument on either decorator | `reportArgumentType` |
 | Incorrect request/optional parameter on a directly called decorated function | `reportArgumentType` |
@@ -95,7 +117,7 @@ Two overloads in a callback protocol have separate roles: one checks that the ru
 
 The inferred `HEARTBEAT_JOB` and an explicitly annotated `NoRequestJob` both reject `jobs.register(job, …)` with a request-bearing callback. `producer_negative` checks missing, mistyped and unknown constructor fields, mixed forms, invalid `SubmitOptions`, and no-request registration.
 
-Run Pyright with failure on diagnostics, e.g. `pyright --outputjson` and assert error count for the deliberate mistakes only.
+Prefer `python tools/verify_contract_typing.py` for exact rule/site assertions. Manual runs may use `pyright --outputjson`, but count-only checks are not sufficient.
 
 ### Measured gaps (`typing/measured_gaps`)
 
@@ -105,7 +127,7 @@ Probes record **EXPECTED** product targets vs **MEASURED** Pyright 1.1.414 (basi
 | --- | --- | --- |
 | Inferred `Job(..., request=..., result=...)` without `event=` | No declared events | Inferred `None` event slot |
 | `jobs.register(HEARTBEAT_JOB, fn)` with `(request: None, context: …)` callback | Reject wrong arity | `reportCallIssue` and `reportArgumentType` |
-| Manually widened `Job[Request, Result, Event]` | Preserve constructor keywords and handler registration | Explicit-object client only; constructor ParamSpec and checked registration unavailable |
+| Manually widened `Job[Request, Result, Event]` | Preserve constructor keywords and handler registration | Explicit-object client only; constructor ParamSpec unavailable; checked handler registration rejected (see negative fixtures) |
 | Positional constructor-shaped `submit(value)` on a non-keyword-only request class | Reject | Runtime rejects; Pyright may accept through captured constructor ParamSpec |
 
 ## Wheel build and producer-only install (isolated from source layout)

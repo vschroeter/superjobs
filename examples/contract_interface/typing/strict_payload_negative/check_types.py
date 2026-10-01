@@ -9,4 +9,4 @@ from superjobs_contract_example import ManifestRequest
 
 def _wrong_validate_instance() -> None:
     adapter = DataclassPayloadAdapter(ManifestRequest)
-    validate_payload(adapter, "not-a-manifest-request")  # reportArgumentType
+    validate_payload(adapter, "not-a-manifest-request")  # expect: reportArgumentType

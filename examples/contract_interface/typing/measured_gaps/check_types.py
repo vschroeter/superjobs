@@ -14,7 +14,7 @@ from superjobs_contract_example import (
 
 
 def _widened_job_erases_constructor_keywords(jobs: SuperJobs) -> None:
-    """Widening removes constructor keywords and checked handler registration."""
+    """Widening removes constructor keywords; handler registration is rejected in negative fixtures."""
 
     def accept(job: Job[ManifestRequest, ManifestResult, ManifestEvent]) -> None:
         reveal_type(jobs.client(job))

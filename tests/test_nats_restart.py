@@ -1,5 +1,5 @@
+import uuid
 import asyncio
-import os
 
 import pytest
 from pydantic import BaseModel
@@ -18,18 +18,12 @@ class Result(BaseModel):
 
 @pytest.mark.nats
 @pytest.mark.asyncio
-async def test_nats_redelivers_an_attempt_after_worker_restart() -> None:
-    from faststream.nats import NatsBroker
-
-    url = os.getenv("NATS_URL", "nats://localhost:4222")
-    first_runtime = SuperJobs(
-        broker=NatsBroker(url, connect_timeout=1),
-    )
-    second_runtime = SuperJobs(
-        broker=NatsBroker(url, connect_timeout=1),
-    )
-    first_job = Job("tests.nats.restart", version="v1", request=Request, result=Result)
-    second_job = Job("tests.nats.restart", version="v1", request=Request, result=Result)
+async def test_nats_redelivers_an_attempt_after_worker_restart(nats_broker_factory, nats_queue_config) -> None:
+    test_id = uuid.uuid4().hex
+    first_runtime = SuperJobs(broker=nats_broker_factory(), queue_config=nats_queue_config)
+    second_runtime = SuperJobs(broker=nats_broker_factory(), queue_config=nats_queue_config)
+    first_job = Job(f"tests.nats.restart.{test_id}", version="v1", request=Request, result=Result)
+    second_job = Job(f"tests.nats.restart.{test_id}", version="v1", request=Request, result=Result)
     first_started = asyncio.Event()
     calls = {"first": 0, "second": 0}
 
@@ -45,18 +39,12 @@ async def test_nats_redelivers_an_attempt_after_worker_restart() -> None:
         calls["second"] += 1
         return Result(value=request.value)
 
-    try:
-        await first_runtime.start()
-        await second_runtime.start()
-    except Exception as exception:
-        await first_runtime.stop()
-        await second_runtime.stop()
-        pytest.skip(f"NATS/JetStream is unavailable: {exception}")
-
+    await first_runtime.start()
     try:
         first_handle = await first_runtime.client(first_job).submit(Request(value=5))
         await asyncio.wait_for(first_started.wait(), timeout=1)
         await first_runtime.stop(graceful=False)
+        await second_runtime.start()
 
         second_handle = await second_runtime.client(second_job).get(first_handle.id)
         assert await second_handle.result(wait_timeout=2) == Result(value=5)

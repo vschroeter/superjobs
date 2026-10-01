@@ -1,0 +1,2 @@
+5d2c51caca950333aba84911df7d377f826f3a59ec36061c6539105084f65c92  nats-server-v2.15.0-linux-amd64.tar.gz
+2d0861dc2ca3567d17f7d19611d7b346cc2ccbd7086a0a77cc957a2c71663200  nats-server-v2.15.0-windows-amd64.zip

@@ -63,6 +63,20 @@ def _explicit_presence_aware_annotations(
     jobs.register(request_job, request_handler)
     jobs.register(no_request_job, no_request_handler)
 
+    @request_job.handler
+    async def request_marked(
+        request: ManifestRequest, context: JobContext[ManifestEvent]
+    ) -> ManifestResult:
+        return ManifestResult(revision=request.device_id)
+
+    jobs.register(request_marked)
+
+    @no_request_job.handler
+    async def no_request_marked(context: JobContext[None]) -> HeartbeatResult:
+        return HeartbeatResult(ok=True)
+
+    jobs.register(no_request_marked)
+
 
 def _contract_types() -> None:
     assert_type(_as_base_job(MANIFEST_WITH_EVENTS_JOB), Job[ManifestRequest, ManifestResult, ManifestEvent])

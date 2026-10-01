@@ -66,5 +66,11 @@ For deterministic tests, inject `InMemoryTransport`:
 jobs = SuperJobs(transport=InMemoryTransport())
 ```
 
-NATS integration tests are marked with `pytest.mark.nats` and use
-`NATS_URL` when set.
+NATS integration tests are marked with `pytest.mark.nats`. By default the harness
+starts an isolated JetStream server (pinned `nats-server` v2.15.0). Set `NATS_URL`
+to use an external broker, or `NATS_EXECUTABLE` for an offline binary path. See
+[docs/design/nats-test-harness.md](docs/design/nats-test-harness.md).
+
+```bash
+uv run pytest -m nats
+```

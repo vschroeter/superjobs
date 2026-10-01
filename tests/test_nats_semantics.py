@@ -1,4 +1,4 @@
-import os
+import asyncio
 import uuid
 
 import pytest
@@ -20,15 +20,8 @@ class Result(BaseModel):
 
 @pytest.mark.nats
 @pytest.mark.asyncio
-async def test_nats_idempotency_and_retry_preserve_one_execution() -> None:
-    from faststream.nats import NatsBroker
-
-    jobs = SuperJobs(
-        broker=NatsBroker(
-            os.getenv("NATS_URL", "nats://localhost:4222"),
-            connect_timeout=1,
-        ),
-    )
+async def test_nats_idempotency_and_retry_preserve_one_execution(nats_broker, nats_queue_config) -> None:
+    jobs = SuperJobs(broker=nats_broker, queue_config=nats_queue_config)
     job = Job(
         f"tests.nats.behavior.{uuid.uuid4().hex}",
         version="v1",
@@ -48,11 +41,7 @@ async def test_nats_idempotency_and_retry_preserve_one_execution() -> None:
             raise RuntimeError("temporary")
         return Result(value=request.value)
 
-    try:
-        await jobs.start()
-    except Exception as exception:
-        pytest.skip(f"NATS/JetStream is unavailable: {exception}")
-
+    await jobs.start()
     try:
         client = jobs.client(job)
         idempotency_key = f"same-{uuid.uuid4()}"

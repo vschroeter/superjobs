@@ -1,4 +1,4 @@
-import os
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -19,22 +19,12 @@ class Result(BaseModel):
 
 @pytest.mark.nats
 @pytest.mark.asyncio
-async def test_nats_producer_only_deadline_is_enforced() -> None:
-    from faststream.nats import NatsBroker
+async def test_nats_producer_only_deadline_is_enforced(nats_broker, nats_queue_config) -> None:
+    test_id = uuid.uuid4().hex
+    jobs = SuperJobs(broker=nats_broker, queue_config=nats_queue_config)
+    job = Job(f"tests.nats.producer-deadline.{test_id}", version="v1", request=Request, result=Result)
 
-    jobs = SuperJobs(
-        broker=NatsBroker(
-            os.getenv("NATS_URL", "nats://localhost:4222"),
-            connect_timeout=1,
-        ),
-    )
-    job = Job("tests.nats.producer-deadline", version="v1", request=Request, result=Result)
-
-    try:
-        await jobs.start()
-    except Exception as exception:
-        pytest.skip(f"NATS/JetStream is unavailable: {exception}")
-
+    await jobs.start()
     try:
         handle = await jobs.client(job).submit(
             Request(value=1),

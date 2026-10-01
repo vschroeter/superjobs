@@ -131,11 +131,6 @@ class JobHandlerDescriptor:
         self, obj: RequestJob[ReqT, FinalT, InterT, ConstructorP], owner: type[object] | None
     ) -> JobHandlerDecorator[ReqT, FinalT, InterT]: ...
 
-    @overload
-    def __get__(
-        self, obj: Job[ReqT, FinalT, InterT], owner: type[object] | None
-    ) -> JobHandlerDecorator[ReqT, FinalT, InterT]: ...
-
     def __get__(
         self, obj: Job[Any, Any, Any] | None, owner: type[object] | None
     ) -> JobHandlerDecorator[Any, Any, Any] | JobNoRequestHandlerDecorator[Any, Any]:

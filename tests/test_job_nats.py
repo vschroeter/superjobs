@@ -1,5 +1,4 @@
-import os
-
+import uuid
 import pytest
 from pydantic import BaseModel
 
@@ -18,16 +17,11 @@ class Result(BaseModel):
 
 @pytest.mark.nats
 @pytest.mark.asyncio
-async def test_nats_submit_result_and_replay() -> None:
-    from faststream.nats import NatsBroker
-
-    broker = NatsBroker(
-        os.getenv("NATS_URL", "nats://localhost:4222"),
-        connect_timeout=1,
-    )
-    jobs = SuperJobs(broker=broker)
+async def test_nats_submit_result_and_replay(nats_broker, nats_queue_config) -> None:
+    test_id = uuid.uuid4().hex
+    jobs = SuperJobs(broker=nats_broker, queue_config=nats_queue_config)
     job = Job(
-        "tests.nats.submit",
+        f"tests.nats.submit.{test_id}",
         version="v1",
         request=Request,
         result=Result,
@@ -37,11 +31,7 @@ async def test_nats_submit_result_and_replay() -> None:
     async def handler(request: Request, context) -> Result:
         return Result(value=request.value * 2)
 
-    try:
-        await jobs.start()
-    except Exception as exception:
-        pytest.skip(f"NATS/JetStream is unavailable: {exception}")
-
+    await jobs.start()
     try:
         handle = await jobs.client(job).submit(Request(value=21))
         assert await handle == Result(value=42)

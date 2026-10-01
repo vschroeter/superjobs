@@ -1,5 +1,4 @@
 import asyncio
-import os
 import uuid
 
 import pytest
@@ -32,14 +31,8 @@ class Event(BaseModel):
 
 @pytest.mark.nats
 @pytest.mark.asyncio
-async def test_nats_strict_payload_boundaries() -> None:
-    from faststream.nats import NatsBroker
-
-    broker = NatsBroker(
-        os.getenv("NATS_URL", "nats://localhost:4222"),
-        connect_timeout=2,
-    )
-    jobs = SuperJobs(broker=broker)
+async def test_nats_strict_payload_boundaries(nats_broker, nats_queue_config) -> None:
+    jobs = SuperJobs(broker=nats_broker, queue_config=nats_queue_config)
     run_id = uuid.uuid4().hex
     ok_job = Job(
         f"tests.nats.strict_payload.ok.{run_id}",
