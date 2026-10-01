@@ -106,9 +106,11 @@ the final targeted suite was verified separately.
 | Final `dev_check fast`, Linux/WSL CPython 3.14 | **356 passed, one Windows-only skip**, 16 deselected | Includes all 23 orchestration regressions; broker-free command passed |
 | `dev_check full`, Windows CPython 3.12 | **All six stages passed**, about 81 seconds | Fast tests: 352 passed; typing, NATS, cross-program, worker recovery, broker restart passed |
 | `dev_check full`, Linux/WSL CPython 3.14 | **All six stages passed**, about 66 seconds | Fast tests: 351 passed, one Windows-only skip; all required NATS scenarios passed |
+| Post-merge `dev_check full`, Windows CPython 3.14 | **All six stages passed**, about 86 seconds | Final source, wheel typing, real NATS, installed processes, both recovery runners |
+| Post-merge `dev_check full`, Linux/WSL CPython 3.12 | **All six stages passed**, about 69 seconds | Final source and all required integration stages |
 | Integration control, Windows CPython 3.12, missing `NATS_EXECUTABLE` | **Exit 1**, required NATS stage failed | Typing passed, then three NATS failures/eight errors; no later stages executed; failure evidence retained |
 | External detached-child cleanup control, Windows/Linux CPython 3.12 | **Passed on both platforms** | PID readiness evidence and native process state confirmed child termination after timeout |
-| GitHub Actions matrix (six fast/four integration cells plus aggregates) | **Pending** | Local evidence does not establish hosted job results; requires a PR or dispatch |
+| GitHub Actions matrix (six fast/four integration cells plus aggregates) | **All twelve jobs passed** | [Run 36910809614](https://github.com/vschroeter/superjobs/actions/runs/36910809614), code revision `083fe594971c7406a6ba07ba16cc53b391ba9b8d`, [draft PR #26](https://github.com/vschroeter/superjobs/pull/26) |
 
 The scheduling-sensitive execution/retention test oracles exposed during these
 checks were fixed separately in [Make completion and retention test synchronization
@@ -119,6 +121,12 @@ Generated local evidence is under `dist/verification/issue15-review/` in the
 verification worktree; it is ignored by Git. CI uploads the selected run directory
 on failure. Stress/performance and additional crash windows remain outside the
 required PR gates.
+
+The primary agent's post-merge evidence is under
+`dist/verification/issue15/root-windows-full314` and
+`dist/verification/issue15/root-linux-full312`. The measured hosted run covers
+the final implementation before this documentation-only verification update.
+Branch protection remains unconfigured, and the draft PR has not been merged on GitHub.
 
 Focused iteration without broker or contract typing pytest gate:
 
