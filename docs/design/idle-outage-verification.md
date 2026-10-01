@@ -84,3 +84,26 @@ sets `NATS_EXECUTABLE` to a nonexistent path and runs the verifier CLI (exit `1`
 The final standalone control also returned exit `1` with `NatsProvisionError`
 (`dist/verification/issue20-final-broken-infra`).
 Mocked broker start failure: `test_broker_start_failure_writes_summary`.
+
+## Combined post-merge verification — 2026-10-01
+
+Codex merged the independently reviewed issue #20 and #21 worktrees into
+`api_design` at `2abf28d`, then verified the combined implementation.
+
+| Platform | Python | Full verification | Fast tests |
+| --- | --- | --- | --- |
+| Windows | 3.12 | All seven stages passed | 395 passed |
+| Windows | 3.14 | All seven stages passed | 395 passed |
+| Linux (WSL Ubuntu 24.04) | 3.12 | All seven stages passed | 394 passed, one Windows-only skip |
+| Linux (WSL Ubuntu 24.04) | 3.14 | All seven stages passed | 394 passed, one Windows-only skip |
+
+These runs include positive and negative Pyright consumers against source and
+installed wheels, real NATS tests, installed cross-program contracts, worker crash
+recovery, persistent broker restart, and idle outage recovery. Evidence is retained
+under `dist/verification/issues20-21/root-{windows,linux}{312,314}`.
+
+The optional retry-publication recovery case also passed on the merged code on
+both platforms with Python 3.14, including the two existing recovery scenarios.
+Its evidence is under `dist/verification/issues20-21/root-{windows,linux}-optional314`.
+It remains an optional manual check; the required worker recovery defaults are
+unchanged. Worktree runs separately verified the optional case with Python 3.12.
