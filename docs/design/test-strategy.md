@@ -92,5 +92,6 @@ on Python 3.12 and 3.14 (#11). Both slices were independently verified on Window
 and Linux. [The cross-program gate](cross-program-verification.md) now verifies installed
 producer/worker boundaries and ordinary behavior (#12) on both platforms with Python 3.12
 and 3.14. [The worker recovery gate](worker-recovery-verification.md) proves controlled kills
-before and after durable completion (#13) on the same platform/runtime matrix. Broker
-persistence and required CI work in #14–#15 remain open.
+before and after durable completion (#13) on the same platform/runtime matrix. [The broker
+restart gate](broker-restart-verification.md) proves persistent-store broker restart with fresh
+installed applications (#14). Required CI work in #15 remains open.

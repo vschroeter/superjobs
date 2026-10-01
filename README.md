@@ -93,3 +93,12 @@ uv run python tools/verify_worker_recovery.py --python 3.12 --python 3.14 --arti
 
 See [worker recovery verification](docs/design/worker-recovery-verification.md) for scenarios,
 checkpoints, and evidence retention.
+
+Verify execution and result persistence across a NATS broker restart:
+
+```bash
+uv run python tools/verify_broker_restart.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue14
+```
+
+See [broker restart verification](docs/design/broker-restart-verification.md) for the scenario,
+broker resource evidence, and failure diagnostics.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import runpy
 import sys
 from pathlib import Path
@@ -22,6 +23,9 @@ def main() -> None:
         raise SystemExit(2)
     sys.path.insert(0, str(role_dir))
     sys.argv = [str(script)] + sys.argv[3:]
+    started_path = os.environ.get("SUPERJOBS_PROCESS_STARTED_PATH")
+    if started_path:
+        Path(started_path).write_text(str(os.getpid()), encoding="utf-8")
     runpy.run_path(str(script), run_name="__main__")
 
 

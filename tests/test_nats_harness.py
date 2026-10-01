@@ -10,6 +10,46 @@ import pytest
 from tests.support.nats_harness import provision, server
 
 
+def test_failed_launch_reap_retains_process_for_reserved_cleanup():
+    class PendingProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def kill(self):
+            pass
+
+        def wait(self, timeout):
+            raise subprocess.TimeoutExpired("owned-server", timeout)
+
+    process = PendingProcess()
+    target = server.NatsServerTarget(owned=True, process=process)
+    owner = server.OwnedNatsServer()
+    owner._reap_launch_process(target, deadline=time.monotonic())
+    assert target.process is process
+
+
+def test_failed_restart_preserves_primary_and_cleanup_errors(monkeypatch):
+    owner = server.OwnedNatsServer()
+    target = server.NatsServerTarget(owned=True, url="nats://127.0.0.1:4222")
+    owner.target = target
+    primary = subprocess.TimeoutExpired("owned-server", 1)
+
+    def fail_pause(*args, **kwargs):
+        raise primary
+
+    def fail_stop(*args, **kwargs):
+        raise OSError("cleanup control")
+
+    monkeypatch.setattr(owner, "pause", fail_pause)
+    monkeypatch.setattr(owner, "stop", fail_stop)
+    with pytest.raises(RuntimeError, match="TimeoutExpired:.*cleanup: cleanup control") as error:
+        owner.restart(target)
+    assert error.value.__cause__ is primary
+
+
 def test_checksum_mismatch_never_extracts_or_executes(tmp_path, monkeypatch):
     monkeypatch.delenv('NATS_EXECUTABLE', raising=False)
     monkeypatch.setenv('SUPERJOBS_NATS_CACHE', str(tmp_path))
@@ -48,6 +88,56 @@ def test_failed_start_cleans_owned_root_and_retains_log(tmp_path, monkeypatch, f
         owner.start()
     assert not root.exists()
     assert owner.target.log_path.read_text() == 'startup diagnosis'
+
+
+def test_launch_caps_long_supplied_deadline(tmp_path, monkeypatch):
+    root = tmp_path / 'owned'
+    root.mkdir()
+    monkeypatch.setattr(server, 'resolve_executable', lambda: Path('server'))
+    monkeypatch.setenv('SUPERJOBS_NATS_LOG_DIR', str(tmp_path / 'logs'))
+    owner = server.OwnedNatsServer()
+    owner._executable = Path('server')
+    log_path = tmp_path / 'owned.log'
+    log_path.write_text('', encoding='utf-8')
+    owner.target = server.NatsServerTarget(
+        owned=True,
+        work_dir=root,
+        log_path=log_path,
+    )
+
+    class HungProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def kill(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(server.subprocess, 'Popen', lambda *a, **k: HungProcess())
+    mono = time.monotonic()
+    def fake_monotonic():
+        nonlocal mono
+        mono += 0.05
+        return mono
+    monkeypatch.setattr(server.time, 'monotonic', fake_monotonic)
+    monkeypatch.setattr(server.time, 'sleep', lambda *a: None)
+    iterations = {'count': 0}
+    original_bounded = server._phase_deadline
+
+    def bounded(deadline, phase_seconds):
+        iterations['count'] += 1
+        return original_bounded(deadline, 0.2 if phase_seconds == server.STARTUP_TIMEOUT_SECONDS else phase_seconds)
+
+    monkeypatch.setattr(server, '_phase_deadline', bounded)
+    long_deadline = fake_monotonic() + 600
+    with pytest.raises(TimeoutError, match='30 seconds'):
+        owner._launch(port=4222, deadline=long_deadline)
+    assert owner.target.process is None
 
 
 @pytest.mark.asyncio
