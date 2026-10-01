@@ -89,7 +89,9 @@ PRODUCER_SUPPORT_FILES = ROLE_SHARED_FILES + ("producer_app.py", "queue_config.p
 
 SCENARIO_BEFORE = "recovery_before_completion"
 SCENARIO_AFTER = "recovery_after_completion"
+SCENARIO_AFTER_RETRY = "recovery_after_retry_publication"
 RECOVERY_SCENARIOS = (SCENARIO_BEFORE, SCENARIO_AFTER)
+OPTIONAL_RECOVERY_SCENARIOS = (SCENARIO_AFTER_RETRY,)
 
 
 class WorkerRecoveryError(Exception):
@@ -249,7 +251,7 @@ def _capture_generation_snapshot(state_dir: Path, generation: str) -> dict[str, 
     ready_file = wr_protocol.ready_path(state_dir)
     if ready_file.is_file():
         snapshot["worker_ready.json"] = _snapshot_json_file(ready_file)
-    for name in (wr_protocol.SUBMITTED, wr_protocol.COMPLETION_SAVED):
+    for name in (wr_protocol.SUBMITTED, wr_protocol.COMPLETION_SAVED, wr_protocol.RETRY_PUBLISHED):
         path = wr_protocol.checkpoint_path(state_dir, name)
         if path.is_file():
             snapshot[path.name] = _snapshot_json_file(path)
@@ -369,6 +371,28 @@ def _validate_replacement_ack(
         raise WorkerRecoveryError(
             "replacement_ack requires terminal_event_published true after recovery",
         )
+
+
+def _validate_retry_published_checkpoint(
+    marker: wr_protocol.CheckpointMarker,
+    *,
+    worker_record: ChildRecord,
+    execution_id: str,
+) -> None:
+    if marker.pid != worker_record.pid:
+        raise WorkerRecoveryError(
+            f"retry_published pid {marker.pid} != worker pid {worker_record.pid}",
+        )
+    if marker.worker_generation != "1":
+        raise WorkerRecoveryError(
+            f"retry_published generation {marker.worker_generation!r} != '1'",
+        )
+    if marker.execution_id != execution_id:
+        raise WorkerRecoveryError("retry_published execution_id mismatch")
+    if marker.delivery_attempt is None or marker.delivery_attempt < 1:
+        raise WorkerRecoveryError("retry_published missing delivery_attempt evidence")
+    if marker.retry_target_attempt is None or marker.retry_target_attempt < 2:
+        raise WorkerRecoveryError("retry_published missing retry_target_attempt evidence")
 
 
 def _validate_handler_entered_checkpoint(
@@ -696,6 +720,39 @@ def _run_recovery_scenario(
                 minimum=1,
                 deadline=_wait_budget_seconds(scenario_deadline),
             )
+        elif scenario == SCENARIO_AFTER_RETRY:
+            handler_marker = wr_protocol.wait_for_checkpoint(
+                state_dir,
+                name=handler_g1,
+                expected_run_id=run_id,
+                expected_execution_id=execution_id,
+                deadline=_wait_budget_seconds(scenario_deadline),
+                child_process=worker_process,
+            )
+            _validate_handler_entered_checkpoint(
+                handler_marker,
+                worker_record=worker_record,
+                execution_id=execution_id,
+                worker_generation="1",
+            )
+            wr_protocol.wait_for_invocation_count(
+                state_dir,
+                minimum=1,
+                deadline=_wait_budget_seconds(scenario_deadline),
+            )
+            retry_published = wr_protocol.wait_for_checkpoint(
+                state_dir,
+                name=wr_protocol.RETRY_PUBLISHED,
+                expected_run_id=run_id,
+                expected_execution_id=execution_id,
+                deadline=_wait_budget_seconds(scenario_deadline),
+                child_process=worker_process,
+            )
+            _validate_retry_published_checkpoint(
+                retry_published,
+                worker_record=worker_record,
+                execution_id=execution_id,
+            )
         else:
             completion_saved = wr_protocol.wait_for_checkpoint(
                 state_dir,
@@ -876,10 +933,10 @@ def _run_recovery_scenario(
         )
         gen1_count = sum(1 for item in invocations if item.worker_generation == "1")
         gen2_count = sum(1 for item in invocations if item.worker_generation == "2")
-        if scenario == SCENARIO_BEFORE:
+        if scenario in (SCENARIO_BEFORE, SCENARIO_AFTER_RETRY):
             if gen1_count < 1 or gen2_count < 1:
                 raise WorkerRecoveryError(
-                    f"scenario A requires gen1 and gen2 invocations, saw "
+                    f"scenario {scenario} requires gen1 and gen2 invocations, saw "
                     f"gen1={gen1_count} gen2={gen2_count}",
                 )
         else:
@@ -933,6 +990,7 @@ def verify_python_version(
     library: Path,
     contract: Path,
     artifact_dir: Path,
+    optional_scenarios: tuple[str, ...] = (),
 ) -> PythonPassState:
     tag = runtime_evidence_tag(python_version)
     state = PythonPassState(
@@ -995,7 +1053,7 @@ def verify_python_version(
             ),
         }
 
-        for scenario in RECOVERY_SCENARIOS:
+        for scenario in (*RECOVERY_SCENARIOS, *optional_scenarios):
             # Keep the owned broker's bounded stop inside the overall scenario cap.
             scenario_deadline = time.monotonic() + SCENARIO_TIMEOUT_SECONDS - SHUTDOWN_TIMEOUT_SECONDS
             owner = OwnedNatsServer()
@@ -1068,6 +1126,18 @@ def verify_python_version(
     return state
 
 
+def collect_optional_scenarios(args: argparse.Namespace) -> tuple[str, ...]:
+    selected = tuple(args.optional_scenarios or ())
+    if not selected:
+        return ()
+    unknown = [item for item in selected if item not in OPTIONAL_RECOVERY_SCENARIOS]
+    if unknown:
+        raise WorkerRecoveryError(
+            f"unsupported optional scenario(s): {', '.join(unknown)}",
+        )
+    return tuple(dict.fromkeys(selected))
+
+
 def collect_python_versions(args: argparse.Namespace) -> tuple[str, ...]:
     versions: list[str] = list(args.python_versions or [])
     if not versions:
@@ -1094,12 +1164,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Retain temporary work directories after a successful run.",
     )
     parser.add_argument(
+        "--scenario",
+        action="append",
+        dest="optional_scenarios",
+        choices=OPTIONAL_RECOVERY_SCENARIOS,
+        help=(
+            "Optional exploratory recovery scenario(s); required scenarios "
+            f"{', '.join(RECOVERY_SCENARIOS)} always run."
+        ),
+    )
+    parser.add_argument(
         "--work-dir",
         type=Path,
         help="Parent directory for temporary verification files (must be outside the repo).",
     )
     args = parser.parse_args(argv)
     python_versions = collect_python_versions(args)
+    optional_scenarios = collect_optional_scenarios(args)
     parent = args.work_dir or Path(tempfile.gettempdir())
     assert_work_parent_outside_repo(parent)
     work_dir = Path(tempfile.mkdtemp(prefix="superjobs-worker-recovery-", dir=parent))
@@ -1122,6 +1203,7 @@ def main(argv: list[str] | None = None) -> int:
                 library=library,
                 contract=contract,
                 artifact_dir=artifact_dir,
+                optional_scenarios=optional_scenarios,
             )
     except (WorkerRecoveryError, VerificationError, KeyboardInterrupt) as exc:
         exit_code = 1
@@ -1160,7 +1242,8 @@ def main(argv: list[str] | None = None) -> int:
     print("verify_worker_recovery: OK")
     for py_version in python_versions:
         tag = runtime_evidence_tag(py_version)
-        print(f"Worker recovery {tag}: scenarios {', '.join(RECOVERY_SCENARIOS)}")
+        scenarios_run = [*RECOVERY_SCENARIOS, *optional_scenarios]
+        print(f"Worker recovery {tag}: scenarios {', '.join(scenarios_run)}")
     if not owns_default_artifacts:
         print(f"Artifacts written to {artifact_dir}")
     return 0

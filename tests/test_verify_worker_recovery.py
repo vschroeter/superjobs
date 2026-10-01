@@ -251,6 +251,7 @@ def test_runner_help_exits_zero() -> None:
     )
     assert completed.returncode == 0
     assert "--artifact-dir" in completed.stdout
+    assert "--scenario" in completed.stdout
 
 
 def test_recovery_scenario_rejects_stale_ready_pid(
@@ -423,6 +424,41 @@ def test_validate_handler_entered_rejects_pid_mismatch() -> None:
             execution_id="exec-1",
             worker_generation="1",
         )
+
+
+def test_validate_retry_published_rejects_missing_attempt_evidence() -> None:
+    worker = ChildRecord(name="worker-1", command=[], cwd=Path("."), started_at=0.0, pid=10)
+    marker = wr_protocol.CheckpointMarker(
+        run_id="run",
+        checkpoint=wr_protocol.RETRY_PUBLISHED,
+        execution_id="exec-1",
+        pid=10,
+        worker_generation="1",
+    )
+    with pytest.raises(vwr.WorkerRecoveryError, match="delivery_attempt"):
+        vwr._validate_retry_published_checkpoint(
+            marker,
+            worker_record=worker,
+            execution_id="exec-1",
+        )
+
+
+def test_validate_retry_published_accepts_delivery_and_retry_evidence() -> None:
+    worker = ChildRecord(name="worker-1", command=[], cwd=Path("."), started_at=0.0, pid=10)
+    marker = wr_protocol.CheckpointMarker(
+        run_id="run",
+        checkpoint=wr_protocol.RETRY_PUBLISHED,
+        execution_id="exec-1",
+        pid=10,
+        worker_generation="1",
+        delivery_attempt=1,
+        retry_target_attempt=2,
+    )
+    vwr._validate_retry_published_checkpoint(
+        marker,
+        worker_record=worker,
+        execution_id="exec-1",
+    )
 
 
 def test_broker_start_failure_writes_scenario_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

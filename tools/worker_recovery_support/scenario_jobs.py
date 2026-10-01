@@ -22,3 +22,12 @@ def after_completion_job(run_id: str) -> Job:
         request=ManifestRequest,
         result=ManifestResult,
     )
+
+
+def after_retry_publication_job(run_id: str) -> Job:
+    return Job(
+        f"worker_recovery.after_retry_publication.{run_id}",
+        version="v1",
+        request=ManifestRequest,
+        result=ManifestResult,
+    )

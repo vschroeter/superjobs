@@ -8,7 +8,8 @@ From the repository root, with Python and uv available:
 
 ```bash
 uv run python tools/verify_worker_recovery.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue13/windows-final-composer
-uv run pytest tests/test_verify_worker_recovery.py tests/test_worker_recovery_delivery_seam.py tests/test_worker_recovery_spawn_pid.py -q
+uv run python tools/verify_worker_recovery.py --python 3.12 --scenario recovery_after_retry_publication --artifact-dir dist/verification/issue21/retry-publication
+uv run pytest tests/test_verify_worker_recovery.py tests/test_worker_recovery_delivery_seam.py tests/test_worker_recovery_producer_closure.py tests/test_worker_recovery_spawn_pid.py -q
 ```
 
 The runner reuses non-editable wheel builds from `tools/verify_contract_typing.py`, separate
@@ -29,6 +30,7 @@ config path, and config content fingerprint stay unchanged for the scenario life
 | --- | --- |
 | `recovery_before_completion` | Hard-kill the first worker after handler entry on the same execution; replacement worker plus a fresh producer `client.get(id)` recover result, outcome, and `JobCompleted` terminal closure. Requires at least one gen-1 and one gen-2 handler invocation for the same execution id (duplicates allowed). Gen-2 must record `replacement_ack` after the real JetStream delivery `ack`. Handler checkpoint validation includes gen-1 `pid` and `worker_generation`. |
 | `recovery_after_completion` | Worker-only `BlockingAfterCompletionBackend` awaits the real `write_completion`, writes a `completion_saved` checkpoint (gen-1 pid/generation, `COMPLETED`, `terminal_event_published: false`), then blocks before terminal publication/ack; hard-kill, replacement worker, fresh producer recovery. Exactly one gen-1 handler invocation and no gen-2 handler re-entry after `replacement_ack` and cooperative stop; redelivery is reconciled via terminal delivery ack only. |
+| `recovery_after_retry_publication` *(optional, `--scenario`)* | Gen-1 handler fails attempt 1 under `RetryPolicy(max_attempts=2, backoff=0)`. Gen-1 uses worker-only `BlockingAfterRetryPublicationBackend`, which **awaits the real** `NatsJobBackend._publish_retry`, writes `retry_published` with delivery and scheduled retry attempt evidence (delivery attempt captured on the work subscription), then **blocks** so `NatsDelivery.retry` cannot acknowledge the original JetStream delivery until the seam releases (deterministic tests assert `retry_published` is present while `ack_sync` is still unawaited); gen-2 uses the regular backend. Hard-kill, replacement worker, fresh producer recovery with a **30-second** recover-phase cap (`result`, `outcome`, observation reads, and phase timeout; baseline scenarios keep **45-second** recover waits). Producer recovery awaits `result` before asserting public `COMPLETED` status, then proves **strict** observation closure: monotonically increasing sequences, terminal `JobCompleted`, and cursor replay after the first retained observation (including the terminal-only case, where replay must be empty rather than skipping cursor proof). Requires at least one gen-1 and one gen-2 handler invocation (duplicates allowed). Not part of the default required scenario pair. |
 
 Readiness markers include `run_id`, worker `pid` (from the running worker process), and
 `worker_generation` so a stale gen-1 marker cannot satisfy gen-2 startup (generation mismatch and
@@ -114,3 +116,24 @@ reviewed and verified it, then directly completed the interpreter-termination pr
 API signatures, shutdown-budget reservation and explicit ordering signals in tests. These
 measurements concern the working tree. No production defect or library change was needed;
 broker restart and required CI remain in #14 and #15.
+
+## Independent measurements — issue21 retry publication (2026-10-01)
+
+| Check | Windows | Linux (WSL Ubuntu 24.04) |
+| --- | --- | --- |
+| Installed-wheel runner | Python 3.12: optional `recovery_after_retry_publication` passed | Python 3.12: optional scenario passed |
+| Scenario / recover caps | 90-second scenario budget; **30-second** fresh-producer recover phase | Same |
+| External retry checkpoint | `retry_published` observed before hard-kill | Same |
+| Kill evidence | Interpreter **5548** terminated; venv launcher exit **1** | Interpreter **45334** exit **-9** |
+| Recovered closure | `result`, public `COMPLETED` status, `JobSucceeded` outcome, strict observation cursor replay | Same |
+
+Duplicate handler invocations across generations are allowed for this scenario; measurements do
+not indicate a production defect or library change.
+
+Artifacts: `dist/verification/issue21/windows-final` and
+`dist/verification/issue21/linux-final`.
+
+```bash
+uv run python tools/verify_worker_recovery.py --python 3.12 --scenario recovery_after_retry_publication --artifact-dir dist/verification/issue21/windows-final
+uv run pytest tests/test_verify_worker_recovery.py tests/test_worker_recovery_delivery_seam.py tests/test_worker_recovery_producer_closure.py tests/test_worker_recovery_spawn_pid.py -q
+```
