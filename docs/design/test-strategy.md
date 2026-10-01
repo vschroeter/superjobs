@@ -94,5 +94,6 @@ producer/worker boundaries and ordinary behavior (#12) on both platforms with Py
 and 3.14. [The worker recovery gate](worker-recovery-verification.md) proves controlled kills
 before and after durable completion (#13) on the same platform/runtime matrix. [The broker
 restart gate](broker-restart-verification.md) proves persistent-store broker restart with fresh
-installed applications (#14). Required CI orchestration is implemented in
-[dev-checks-verification.md](dev-checks-verification.md) (#15).
+installed applications (#14). [The idle outage gate](idle-outage-verification.md) proves surviving
+installed producer/worker processes reconnect and remain usable after a short broker outage (#20).
+Required CI orchestration is implemented in [dev-checks-verification.md](dev-checks-verification.md) (#15).

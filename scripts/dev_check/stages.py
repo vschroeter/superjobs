@@ -117,6 +117,19 @@ def broker_restart_argv(repo_root: Path, python_version: str, run_dir: Path) -> 
     )
 
 
+def idle_outage_argv(repo_root: Path, python_version: str, run_dir: Path) -> list[str]:
+    artifact = run_dir / "idle-outage"
+    artifact.mkdir(parents=True, exist_ok=True)
+    return _python_tool_argv(
+        repo_root,
+        "tools/verify_idle_outage.py",
+        "--python",
+        python_version,
+        "--artifact-dir",
+        str(artifact),
+    )
+
+
 FAST_STAGES: tuple[StageSpec, ...] = (
     StageSpec(
         name="deterministic-pytest",
@@ -164,6 +177,13 @@ INTEGRATION_STAGES: tuple[StageSpec, ...] = (
         timeout_seconds=_TOOL_STAGE_TIMEOUT,
         build_argv=broker_restart_argv,
         description="Persistent-store broker restart with fresh installed applications.",
+    ),
+    StageSpec(
+        name="idle-outage",
+        kind="tool",
+        timeout_seconds=_TOOL_STAGE_TIMEOUT,
+        build_argv=idle_outage_argv,
+        description="Idle installed producer/worker survive a short broker outage.",
     ),
 )
 

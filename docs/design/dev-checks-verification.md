@@ -44,7 +44,7 @@ uv run --isolated --no-project --python 3.12 --with-editable . --with "pytest>=9
 ```
 
 - **Fast** runs `pytest -m "not nats and not contract_typing"` only. No broker is required.
-- **Full** runs fast stages plus integration stages (contract typing runner, real NATS pytest, cross-program, worker recovery, broker restart). Selecting full makes infrastructure required.
+- **Full** runs fast stages plus integration stages (contract typing runner, real NATS pytest, cross-program, worker recovery, broker restart, idle outage). Selecting full makes infrastructure required.
 - **Integration** (CI) runs the heavy stages only. Contract typing uses `tools/verify_contract_typing.py` directly; the duplicate `pytest -m contract_typing` gate is not part of this orchestration.
 
 Each integration tool stage passes `--python <current-minor>` from the active interpreter (for example `3.12` on a 3.12 job). Pyright remains pinned at **1.1.414** inside the typing runner. NATS **2.15.0** checksums remain in `tests/support/nats_harness/fixtures/`.
@@ -88,7 +88,7 @@ On failure or cancellation, CI uploads `dist/verification/dev-check/**` includin
 - `run-summary.json` (always persisted, including timeouts and interrupts)
 - Per-stage `stdout.txt`, `stderr.txt`, and `stage.json`
 - NATS JUnit `nats-junit.xml` under the run directory
-- Tool runner artifacts under `contract-typing/`, `cross-program/`, `worker-recovery/`, and `broker-restart/` (broker logs, checkpoints, typing JSON as produced by existing runners)
+- Tool runner artifacts under `contract-typing/`, `cross-program/`, `worker-recovery/`, `broker-restart/`, and `idle-outage/` (broker logs, checkpoints, typing JSON as produced by existing runners)
 - NATS broker logs under `nats-logs/` when pytest stages run
 
 Subprocess stages use descendant cleanup (`taskkill /T` on Windows, depth-first signals on Linux) so owned NATS brokers and detached children do not outlive a timed-out stage.
