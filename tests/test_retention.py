@@ -1,12 +1,12 @@
-import asyncio
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
+import superjobs.transport.in_memory as in_memory_transport
 from pydantic import BaseModel
 
 from superjobs.exceptions.jobs import ObservationExpiredError, ResultExpiredError
 from superjobs.jobs.events import JobLog
-from superjobs.jobs.execution import ObservationCursor
+from superjobs.jobs.execution import JobState, ObservationCursor
 from superjobs.jobs.job import Job
 from superjobs.jobs.retention import ObservationRetention, ResultRetention
 from superjobs.superjobs import SuperJobs
@@ -48,7 +48,24 @@ async def test_observation_cursor_reports_expired_history() -> None:
 
 
 @pytest.mark.asyncio
-async def test_result_retention_is_independent_from_completion_status() -> None:
+async def test_result_retention_is_independent_from_completion_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ControlledDateTime(datetime):
+        _now = datetime(2020, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+        @classmethod
+        def now(cls, tz=None):
+            if tz is UTC:
+                return cls._now
+            return datetime.now(tz)
+
+        @classmethod
+        def advance(cls, amount: timedelta) -> None:
+            cls._now = cls._now + amount
+
+    monkeypatch.setattr(in_memory_transport, "datetime", ControlledDateTime)
+
     transport = InMemoryTransport(
         result_retention=ResultRetention(max_age=timedelta(milliseconds=1)),
     )
@@ -61,6 +78,9 @@ async def test_result_retention_is_independent_from_completion_status() -> None:
 
     async with jobs:
         handle = await jobs.client(job).submit(Request(value=1))
-        await asyncio.sleep(0.01)
+        assert await handle.result(wait_timeout=1.0) == Result(value=1)
+        assert (await handle.status()).state is JobState.COMPLETED
+        ControlledDateTime.advance(timedelta(milliseconds=2))
         with pytest.raises(ResultExpiredError):
-            await handle.result()
+            await handle.result(wait_timeout=1.0)
+        assert (await handle.status()).state is JobState.COMPLETED
