@@ -20,7 +20,7 @@ from superjobs.jobs.execution import (
     JobSucceeded,
     ProgressSnapshot,
 )
-from superjobs.jobs.job import Job
+from superjobs.jobs.job import Job, NoRequestJob, RequestJob
 from superjobs.jobs.job_client import (
     JobClient,
     NoRequestJobClient,
@@ -44,6 +44,8 @@ __all__ = [
     "Backoff",
     "FixedBackoff",
     "Job",
+    "NoRequestJob",
+    "RequestJob",
     "JobCancelled",
     "JobCancelledOutcome",
     "JobClient",

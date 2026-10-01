@@ -9,7 +9,7 @@ from pydantic import BaseModel, field_validator
 
 from pydantic import ValidationError
 
-from superjobs import Job, PayloadValidationError, SubmitOptions, SuperJobs
+from superjobs import Job, NoRequestJob, PayloadValidationError, RequestJob, SubmitOptions, SuperJobs
 from superjobs.payload import construct_payload
 from superjobs.payload.adapter.implementations.dataclass import DataclassPayloadAdapter
 from superjobs.jobs.submission import SubmitShapeError
@@ -54,6 +54,13 @@ class ConvertedRequest(BaseModel):
     @classmethod
     def parse(cls, value: object) -> object:
         return int(value)
+
+
+def test_presence_aware_job_classes_reject_opposite_request_shape() -> None:
+    with pytest.raises(TypeError, match="requires a request type"):
+        RequestJob("tests.producer.invalid_request_job", result=DcResult)
+    with pytest.raises(TypeError, match="cannot declare a request type"):
+        NoRequestJob("tests.producer.invalid_no_request_job", request=DcRequest)
 
 
 @pytest.mark.asyncio

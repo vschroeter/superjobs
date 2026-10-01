@@ -14,6 +14,8 @@ from superjobs import (
     JobFailedOutcome,
     JobHandle,
     JobOutcome,
+    NoRequestJob,
+    RequestJob,
     JobSucceeded,
     SuperJobs,
 )
@@ -41,6 +43,25 @@ def _as_base_client[Request, Result, Event](
     client: JobClient[Request, Result, Event],
 ) -> JobClient[Request, Result, Event]:
     return client
+
+
+def _explicit_presence_aware_annotations(
+    jobs: SuperJobs,
+    request_job: RequestJob[ManifestRequest, ManifestResult, ManifestEvent, ...],
+    no_request_job: NoRequestJob[HeartbeatResult, None],
+) -> None:
+    @jobs.handler(request_job)
+    async def request_handler(
+        request: ManifestRequest, context: JobContext[ManifestEvent]
+    ) -> ManifestResult:
+        return ManifestResult(revision=request.device_id)
+
+    @jobs.handler(no_request_job)
+    async def no_request_handler(context: JobContext[None]) -> HeartbeatResult:
+        return HeartbeatResult(ok=True)
+
+    jobs.register(request_job, request_handler)
+    jobs.register(no_request_job, no_request_handler)
 
 
 def _contract_types() -> None:

@@ -163,6 +163,7 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         result_codec: PayloadCodec[FinalT] | None = None,
         event_codec: PayloadCodec[InterT] | None = None,
     ):
+        _validate_request_presence(self, request)
         self.identity = job_identity or JobIdentity(name=name, version=version)
 
         self.request_type = request
@@ -256,3 +257,10 @@ class RequestJob[ReqT, FinalT, InterT, **ConstructorP](
 
 class NoRequestJob[FinalT, InterT](Job[None, FinalT, InterT]):
     """Job specialization for contracts without a request payload."""
+
+
+def _validate_request_presence(job: Job[Any, Any, Any], request: Any) -> None:
+    if isinstance(job, RequestJob) and request is None:
+        raise TypeError("RequestJob requires a request type")
+    if isinstance(job, NoRequestJob) and request is not None:
+        raise TypeError("NoRequestJob cannot declare a request type")

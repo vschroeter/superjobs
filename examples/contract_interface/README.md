@@ -63,7 +63,7 @@ Configs include:
 
 **Include:** `check_types.py`, `../../producer.py`, `../../worker_handlers.py`.
 
-**Expected:** zero errors. Covers inferred contract Job shapes, explicit-object `submit` / `result` / `await handle`, reconstructed `get` handle, no-event and no-result jobs, `event.data` narrowing after `isinstance`, `outcome()` typing (`JobOutcome[FinalT]`, `JobSucceeded` / failure / cancellation narrowing, including `JobOutcome[None]` for no-result jobs), and all three handler registration forms. `producer_positive` additionally checks typed constructor keywords and `SubmitOptions`.
+**Expected:** zero errors. Covers inferred contract Job shapes, explicit-object `submit` / `result` / `await handle`, reconstructed `get` handle, no-event and no-result jobs, `event.data` narrowing after `isinstance`, `outcome()` typing (`JobOutcome[FinalT]`, `JobSucceeded` / failure / cancellation narrowing, including `JobOutcome[None]` for no-result jobs), and all three handler registration forms. Public `RequestJob[Request, Result, Event, ...]` and `NoRequestJob[Result, Event]` retain handler typing when an explicit annotation is needed. `producer_positive` additionally checks typed constructor keywords and `SubmitOptions`.
 
 **Handler typing verified in positive:**
 
@@ -93,7 +93,7 @@ Two overloads in a callback protocol have separate roles: one checks that the ru
 | Incorrect request/optional parameter on a directly called decorated function | `reportArgumentType` |
 | Unknown keyword on a directly called decorated function | `reportCallIssue` |
 
-The inferred `HEARTBEAT_JOB` now rejects `jobs.register(HEARTBEAT_JOB, …)` with a request-bearing callback. `producer_negative` checks missing, mistyped and unknown constructor fields, mixed forms, invalid `SubmitOptions`, and no-request registration.
+The inferred `HEARTBEAT_JOB` and an explicitly annotated `NoRequestJob` both reject `jobs.register(job, …)` with a request-bearing callback. `producer_negative` checks missing, mistyped and unknown constructor fields, mixed forms, invalid `SubmitOptions`, and no-request registration.
 
 Run Pyright with failure on diagnostics, e.g. `pyright --outputjson` and assert error count for the deliberate mistakes only.
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from superjobs import JobContext, SuperJobs
+from superjobs import JobContext, NoRequestJob, SuperJobs
 from superjobs_contract_example import (
     HEARTBEAT_JOB,
     MANIFEST_WITH_EVENTS_JOB,
@@ -120,6 +120,18 @@ def _wrong_no_request_explicit_register(jobs: SuperJobs) -> None:
         return HeartbeatResult(ok=True)
 
     jobs.register(HEARTBEAT_JOB, needs_context_only)  # reportArgumentType
+
+
+def _wrong_explicitly_annotated_no_request_register(
+    jobs: SuperJobs, job: NoRequestJob[HeartbeatResult, None]
+) -> None:
+    async def needs_context_only(
+        request: None,
+        context: JobContext[None],
+    ) -> HeartbeatResult:
+        return HeartbeatResult(ok=True)
+
+    jobs.register(job, needs_context_only)  # reportArgumentType
 
 
 def _wrong_no_request_runtime_decorator(jobs: SuperJobs) -> None:
