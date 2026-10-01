@@ -71,6 +71,28 @@ starts an isolated JetStream server (pinned `nats-server` v2.15.0). Set `NATS_UR
 to use an external broker, or `NATS_EXECUTABLE` for an offline binary path. See
 [docs/design/nats-test-harness.md](docs/design/nats-test-harness.md).
 
+## Developer checks
+
+Routine fast checks (no broker):
+
+```bash
+python -m scripts.dev_check fast
+```
+
+Full local verification (typing, NATS, installed cross-program and recovery runners):
+
+```bash
+python -m scripts.dev_check full
+```
+
+Required PR gates and the CI matrix are documented in
+[docs/design/dev-checks-verification.md](docs/design/dev-checks-verification.md).
+CI-style isolated runs (example Python **3.12**; match the matrix minor on other jobs):
+
+```bash
+uv run --isolated --no-project --python 3.12 --with-editable . --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0" python -m scripts.dev_check fast
+```
+
 ```bash
 uv run pytest -m nats
 ```

@@ -26,10 +26,10 @@ All implementation rows ultimately become required PR evidence. A missing or fai
 
 Provide two documented, exact cross-platform invocations in the orchestration slice:
 
-- **Fast check:** routine deterministic checks without a broker requirement.
-- **Full check:** typing, built/installed distributions, real NATS/process scenarios and selected recovery scenarios, including owned-broker provisioning.
+- **Fast check:** `python -m scripts.dev_check fast` — routine deterministic checks without a broker requirement.
+- **Full check:** `python -m scripts.dev_check full` — typing, built/installed distributions, real NATS/process scenarios and selected recovery scenarios, including owned-broker provisioning.
 
-The names `check-fast` and `check-all` used during the discussion were illustrative, not existing executable commands. The implementation ticket must publish runnable commands; explicitly selecting integration always makes its environment required.
+CI publishes `checks / fast` and `checks / integration` job families in `.github/workflows/checks.yml`. See [dev-checks-verification.md](dev-checks-verification.md). Explicitly selecting integration or full always makes infrastructure required.
 
 Every PR runs required gates on **Linux and Windows**. Fast tests cover every supported stable CPython minor from **3.12** onward. Heavier integration covers minimum and latest stable Python on both platforms. Exclude prereleases from required gates. Maintain an explicit reviewed matrix, verifying stable releases when implementing/updating it rather than assuming future versions are supported by prior runs.
 
@@ -94,4 +94,5 @@ producer/worker boundaries and ordinary behavior (#12) on both platforms with Py
 and 3.14. [The worker recovery gate](worker-recovery-verification.md) proves controlled kills
 before and after durable completion (#13) on the same platform/runtime matrix. [The broker
 restart gate](broker-restart-verification.md) proves persistent-store broker restart with fresh
-installed applications (#14). Required CI work in #15 remains open.
+installed applications (#14). Required CI orchestration is implemented in
+[dev-checks-verification.md](dev-checks-verification.md) (#15).
