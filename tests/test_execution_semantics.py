@@ -41,6 +41,26 @@ class Event:
     value: int
 
 
+async def _wait_for_last_acknowledgement(
+    transport: InMemoryTransport,
+    job_id: str,
+    attempt: int,
+    state: JobState,
+    *,
+    timeout: float = 1.0,
+) -> None:
+    expected = (job_id, attempt, state)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if transport.ack_log and transport.ack_log[-1] == expected:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(
+        f"timed out waiting for last ack {expected}, got {transport.ack_log}",
+    )
+
+
 @pytest.mark.asyncio
 async def test_same_idempotency_key_reuses_execution() -> None:
     transport = InMemoryTransport()
@@ -100,7 +120,12 @@ async def test_redelivery_of_completed_execution_skips_handler() -> None:
         execution = await transport.get_execution(job.identity, handle.id)
         assert execution is not None
         await transport.publish(execution, attempt=2)
-        await asyncio.sleep(0.01)
+        await _wait_for_last_acknowledgement(
+            transport,
+            handle.id,
+            2,
+            JobState.COMPLETED,
+        )
 
     assert calls == 1
     assert transport.ack_log[-1] == (handle.id, 2, JobState.COMPLETED)
