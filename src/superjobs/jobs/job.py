@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast, overload
 
 from superjobs.jobs.handler_decorators import job_handler_descriptor
 from superjobs.jobs.job_identity import JobIdentity
@@ -9,6 +10,146 @@ from superjobs.registry import registry
 
 
 class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        request: Callable[P, ReqT],
+        result: type[FinalT],
+        event: type[InterT],
+        *,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> RequestJob[ReqT, FinalT, InterT, P]: ...
+
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        request: Callable[P, ReqT],
+        result: type[FinalT],
+        event: None = None,
+        *,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> RequestJob[ReqT, FinalT, None, P]: ...
+
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        request: Callable[P, ReqT],
+        result: None = None,
+        event: type[InterT] = ...,
+        *,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> RequestJob[ReqT, None, InterT, P]: ...
+
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        request: Callable[P, ReqT],
+        result: None = None,
+        event: None = None,
+        *,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> RequestJob[ReqT, None, None, P]: ...
+
+    @overload
+    def __new__(
+        cls,
+        name: str,
+        request: None = None,
+        *,
+        result: type[FinalT],
+        event: type[InterT],
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> NoRequestJob[FinalT, InterT]: ...
+
+    @overload
+    def __new__(
+        cls,
+        name: str,
+        request: None = None,
+        *,
+        result: type[FinalT],
+        event: None = None,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> NoRequestJob[FinalT, None]: ...
+
+    @overload
+    def __new__(
+        cls,
+        name: str,
+        request: None = None,
+        *,
+        result: None = None,
+        event: type[InterT],
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> NoRequestJob[None, InterT]: ...
+
+    @overload
+    def __new__(
+        cls,
+        name: str,
+        request: None = None,
+        *,
+        result: None = None,
+        event: None = None,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> NoRequestJob[None, None]: ...
+
+    def __new__(
+        cls,
+        name: str,
+        request: Any = None,
+        result: Any = None,
+        event: Any = None,
+        *,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: Any = None,
+        result_codec: Any = None,
+        event_codec: Any = None,
+    ) -> Any:
+        if cls is Job:
+            target: type[Job[Any, Any, Any]] = (
+                NoRequestJob if request is None else RequestJob
+            )
+            return object.__new__(target)
+        return super().__new__(cls)
+
     def __init__(
         self,
         name: str,
@@ -28,15 +169,15 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         self.result_type = result
         self.event_type = event
 
-        self.request_codec = request_codec or (
-            registry.get_payload_codec(request) if request is not None else None
-        )
-        self.result_codec = result_codec or (
-            registry.get_payload_codec(result) if result is not None else None
-        )
-        self.event_codec = event_codec or (
-            registry.get_payload_codec(event) if event is not None else None
-        )
+        self.request_codec: PayloadCodec[ReqT] | None = request_codec
+        if self.request_codec is None and request is not None:
+            self.request_codec = cast(PayloadCodec[ReqT], registry.get_payload_codec(request))
+        self.result_codec: PayloadCodec[FinalT] | None = result_codec
+        if self.result_codec is None and result is not None:
+            self.result_codec = cast(PayloadCodec[FinalT], registry.get_payload_codec(result))
+        self.event_codec: PayloadCodec[InterT] | None = event_codec
+        if self.event_codec is None and event is not None:
+            self.event_codec = cast(PayloadCodec[InterT], registry.get_payload_codec(event))
 
         self._frozen = True
 
@@ -105,3 +246,13 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         return f"Job({self.canonical_name})"
 
     handler = job_handler_descriptor
+
+
+class RequestJob[ReqT, FinalT, InterT, **ConstructorP](
+    Job[ReqT, FinalT, InterT],
+):
+    """Job specialization that retains the request constructor parameter specification."""
+
+
+class NoRequestJob[FinalT, InterT](Job[None, FinalT, InterT]):
+    """Job specialization for contracts without a request payload."""

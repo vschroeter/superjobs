@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from superjobs import Job
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ManifestRequest:
     device_id: str
 
@@ -22,7 +22,7 @@ class ManifestEvent:
     stage: str
 
 
-MANIFEST_WITH_EVENTS_JOB: Job[ManifestRequest, ManifestResult, ManifestEvent] = Job(
+MANIFEST_WITH_EVENTS_JOB = Job(
     "examples.contract.manifest.with_events",
     version="v1",
     request=ManifestRequest,
@@ -31,7 +31,7 @@ MANIFEST_WITH_EVENTS_JOB: Job[ManifestRequest, ManifestResult, ManifestEvent] = 
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ManifestNoEventsRequest:
     bundle_id: str
 
@@ -41,11 +41,7 @@ class ManifestNoEventsResult:
     accepted: bool
 
 
-MANIFEST_NO_EVENTS_JOB: Job[
-    ManifestNoEventsRequest,
-    ManifestNoEventsResult,
-    None,
-] = Job(
+MANIFEST_NO_EVENTS_JOB = Job(
     "examples.contract.manifest.no_events",
     version="v1",
     request=ManifestNoEventsRequest,
@@ -54,13 +50,13 @@ MANIFEST_NO_EVENTS_JOB: Job[
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class TelemetrySample:
     metric: str
     value: float
 
 
-TELEMETRY_INGEST_JOB: Job[TelemetrySample, None, None] = Job(
+TELEMETRY_INGEST_JOB = Job(
     "examples.contract.telemetry.ingest",
     version="v1",
     request=TelemetrySample,
@@ -74,7 +70,7 @@ class HeartbeatResult:
     ok: bool
 
 
-HEARTBEAT_JOB: Job[None, HeartbeatResult, None] = Job(
+HEARTBEAT_JOB = Job(
     "examples.contract.heartbeat",
     version="v1",
     request=None,

@@ -52,6 +52,8 @@ Runtime tests cover every registration path, sync and async execution, no-reques
 
 This is a measured gap in `typing/measured_gaps`, not a waived requirement or completed static guarantee. Issue #7 remains open until the Job/constructor typing follow-up can represent request presence sufficiently to reject that general-overload fallback. Omitted-payload inference, keyword submission, SubmitOptions, strict payload policy, fingerprints/manifest and sync producer convenience remain separate scopes selected in #4.
 
+Update, 2026-10-01: The producer interface in [issue #8](https://github.com/vschroeter/superjobs/issues/8) introduces inferred request/no-request Job specializations. The explicit no-request registration negative control is now rejected by Pyright. The historical measurements above describe the earlier #7 iteration; current results and the remaining base-Job typing limit are recorded in [producer constructor verification](producer-interface-verification.md).
+
 ## Reproduction
 
 Source commands and fixtures are in `examples/contract_interface/README.md`. For wheel consumers, build/install the library and contract wheels into a fresh environment, copy only the positive/negative/gap fixtures, and select that environment in a Pyright config with empty `extraPaths` and a Python 3.12 target. The negative suite intentionally exits one; assert the diagnostic rules and locations, rather than treating any failure as success. Temporary wheel/environment files are removed after verification.

@@ -31,20 +31,32 @@ from superjobs_contract_example import (
     TelemetrySample,
 )
 
+def _as_base_job[Request, Result, Event](
+    job: Job[Request, Result, Event],
+) -> Job[Request, Result, Event]:
+    return job
+
+
+def _as_base_client[Request, Result, Event](
+    client: JobClient[Request, Result, Event],
+) -> JobClient[Request, Result, Event]:
+    return client
+
+
 def _contract_types() -> None:
-    assert_type(MANIFEST_WITH_EVENTS_JOB, Job[ManifestRequest, ManifestResult, ManifestEvent])
+    assert_type(_as_base_job(MANIFEST_WITH_EVENTS_JOB), Job[ManifestRequest, ManifestResult, ManifestEvent])
     assert_type(
-        MANIFEST_NO_EVENTS_JOB,
+        _as_base_job(MANIFEST_NO_EVENTS_JOB),
         Job[ManifestNoEventsRequest, ManifestNoEventsResult, None],
     )
-    assert_type(TELEMETRY_INGEST_JOB, Job[TelemetrySample, None, None])
-    assert_type(HEARTBEAT_JOB, Job[None, HeartbeatResult, None])
+    assert_type(_as_base_job(TELEMETRY_INGEST_JOB), Job[TelemetrySample, None, None])
+    assert_type(_as_base_job(HEARTBEAT_JOB), Job[None, HeartbeatResult, None])
 
 
 async def _client_and_handle_types(jobs: SuperJobs) -> None:
     manifest_client = jobs.client(MANIFEST_WITH_EVENTS_JOB)
     assert_type(
-        manifest_client,
+        _as_base_client(manifest_client),
         JobClient[ManifestRequest, ManifestResult, ManifestEvent],
     )
     handle = await manifest_client.submit(ManifestRequest(device_id="d"))

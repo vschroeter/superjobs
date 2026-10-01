@@ -42,11 +42,31 @@ def validate_handler_job_association(job: Any, callback: Callable[..., Any]) -> 
 
 def validate_handler_signature(job: Any, callback: Callable[..., Any]) -> None:
     signature = inspect.signature(callback)
-    try:
-        if job.request_type is not None:
-            signature.bind(object(), object())
-        else:
+    if job.request_type is None:
+        positional = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ]
+        if len(positional) != 1:
+            raise TypeError(
+                f"Handler for {job} must accept only the job context, "
+                f"not {len(positional)} positional parameters",
+            )
+        try:
             signature.bind(object())
+        except TypeError as error:
+            raise TypeError(
+                f"Handler signature for {job} cannot be invoked with the mandatory "
+                f"context arguments: {error}",
+            ) from error
+        return
+    try:
+        signature.bind(object(), object())
     except TypeError as error:
         raise TypeError(
             f"Handler signature for {job} cannot be invoked with the mandatory "

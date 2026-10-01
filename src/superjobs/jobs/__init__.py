@@ -21,7 +21,13 @@ from superjobs.jobs.execution import (
     ProgressSnapshot,
 )
 from superjobs.jobs.job import Job
-from superjobs.jobs.job_client import JobClient, submission_fingerprint
+from superjobs.jobs.job_client import (
+    JobClient,
+    NoRequestJobClient,
+    RequestJobClient,
+    submission_fingerprint,
+)
+from superjobs.jobs.submit_options import SubmitOptions
 from superjobs.jobs.job_context import JobContext, ObservationPolicy
 from superjobs.jobs.job_handle import JobHandle
 from superjobs.jobs.job_identity import JobIdentity
@@ -41,6 +47,9 @@ __all__ = [
     "JobCancelled",
     "JobCancelledOutcome",
     "JobClient",
+    "NoRequestJobClient",
+    "RequestJobClient",
+    "SubmitOptions",
     "JobCompleted",
     "CompletionRecord",
     "JobError",

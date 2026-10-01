@@ -112,6 +112,16 @@ def _missing_context_runtime_decorator(jobs: SuperJobs) -> None:
         return ManifestResult(revision=request.device_id)
 
 
+def _wrong_no_request_explicit_register(jobs: SuperJobs) -> None:
+    async def needs_context_only(
+        request: None,
+        context: JobContext[None],
+    ) -> HeartbeatResult:
+        return HeartbeatResult(ok=True)
+
+    jobs.register(HEARTBEAT_JOB, needs_context_only)  # reportArgumentType
+
+
 def _wrong_no_request_runtime_decorator(jobs: SuperJobs) -> None:
     @jobs.handler(HEARTBEAT_JOB)
     async def needs_context_only(

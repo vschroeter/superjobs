@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
-from typing import Any, TypeVar, overload
+from typing import Any, ParamSpec, TypeVar, overload
 
 from faststream.nats import NatsBroker
 
@@ -15,8 +15,13 @@ from superjobs.jobs.handler_decorators import (
     RuntimeHandlerDecorator,
     RuntimeNoRequestHandlerDecorator,
 )
-from superjobs.jobs.job import Job
-from superjobs.jobs.job_client import JobClient
+from superjobs.jobs.job import Job, NoRequestJob, RequestJob
+from superjobs.jobs.job_client import (
+    JobClient,
+    NoRequestJobClient,
+    RequestJobClient,
+    client_for_job,
+)
 from superjobs.jobs.job_context import JobContext, ObservationPolicy
 from superjobs.jobs.job_handler import JobHandler
 from superjobs.jobs.retention import ObservationRetention, ResultRetention
@@ -28,6 +33,7 @@ from superjobs.transport.in_memory import InMemoryTransport
 ReqT = TypeVar("ReqT")
 FinalT = TypeVar("FinalT")
 InterT = TypeVar("InterT")
+ConstructorP = ParamSpec("ConstructorP")
 
 
 class SuperJobs:
@@ -145,7 +151,7 @@ class SuperJobs:
     @overload
     def handler(
         self,
-        job: Job[None, FinalT, InterT],
+        job: NoRequestJob[FinalT, InterT],
         *,
         concurrency: int = 1,
         retry: RetryPolicy | None = None,
@@ -156,7 +162,7 @@ class SuperJobs:
     @overload
     def handler(
         self,
-        job: Job[ReqT, FinalT, InterT],
+        job: RequestJob[ReqT, FinalT, InterT, ConstructorP],
         *,
         concurrency: int = 1,
         retry: RetryPolicy | None = None,
@@ -197,7 +203,7 @@ class SuperJobs:
     @overload
     def register(
         self,
-        job: Job[None, FinalT, InterT],
+        job: NoRequestJob[FinalT, InterT],
         callback: Callable[[JobContext[InterT]], Coroutine[Any, Any, FinalT]],
         /,
         *,
@@ -210,7 +216,7 @@ class SuperJobs:
     @overload
     def register(
         self,
-        job: Job[None, FinalT, InterT],
+        job: NoRequestJob[FinalT, InterT],
         callback: Callable[[JobContext[InterT]], FinalT],
         /,
         *,
@@ -223,7 +229,7 @@ class SuperJobs:
     @overload
     def register(
         self,
-        job: Job[ReqT, FinalT, InterT],
+        job: RequestJob[ReqT, FinalT, InterT, ConstructorP],
         callback: Callable[[ReqT, JobContext[InterT]], Coroutine[Any, Any, FinalT]],
         /,
         *,
@@ -236,7 +242,7 @@ class SuperJobs:
     @overload
     def register(
         self,
-        job: Job[ReqT, FinalT, InterT],
+        job: RequestJob[ReqT, FinalT, InterT, ConstructorP],
         callback: Callable[[ReqT, JobContext[InterT]], FinalT],
         /,
         *,
@@ -334,8 +340,20 @@ class SuperJobs:
             heartbeat_interval=heartbeat_interval,
         )
 
+    @overload
+    def client(
+        self,
+        job: RequestJob[ReqT, FinalT, InterT, ConstructorP],
+    ) -> RequestJobClient[ReqT, FinalT, InterT, ConstructorP]: ...
+
+    @overload
+    def client(self, job: NoRequestJob[FinalT, InterT]) -> NoRequestJobClient[FinalT, InterT]: ...
+
+    @overload
+    def client(self, job: Job[ReqT, FinalT, InterT]) -> JobClient[ReqT, FinalT, InterT]: ...
+
     def client(self, job: Job[ReqT, FinalT, InterT]) -> JobClient[ReqT, FinalT, InterT]:
-        return JobClient(job, self.transport)
+        return client_for_job(job, self.transport)
 
     def _register_handler(
         self,

@@ -46,6 +46,10 @@ cd examples/contract_interface/typing/positive
 uv tool run --from pyright==1.1.414 pyright
 cd ../negative
 uv tool run --from pyright==1.1.414 pyright
+cd ../producer_positive
+uv tool run --from pyright==1.1.414 pyright
+cd ../producer_negative
+uv tool run --from pyright==1.1.414 pyright
 cd ../measured_gaps
 uv tool run --from pyright==1.1.414 pyright
 ```
@@ -59,7 +63,7 @@ Configs include:
 
 **Include:** `check_types.py`, `../../producer.py`, `../../worker_handlers.py`.
 
-**Expected:** zero errors. Covers contract `Job[...]` shapes, `submit` / `result` / `await handle`, reconstructed `get` handle, no-event and no-result jobs, `event.data` narrowing after `isinstance`, `outcome()` typing (`JobOutcome[FinalT]`, `JobSucceeded` / failure / cancellation narrowing, including `JobOutcome[None]` for no-result jobs), and all three handler registration forms.
+**Expected:** zero errors. Covers inferred contract Job shapes, explicit-object `submit` / `result` / `await handle`, reconstructed `get` handle, no-event and no-result jobs, `event.data` narrowing after `isinstance`, `outcome()` typing (`JobOutcome[FinalT]`, `JobSucceeded` / failure / cancellation narrowing, including `JobOutcome[None]` for no-result jobs), and all three handler registration forms. `producer_positive` additionally checks typed constructor keywords and `SubmitOptions`.
 
 **Handler typing verified in positive:**
 
@@ -89,7 +93,7 @@ Two overloads in a callback protocol have separate roles: one checks that the ru
 | Incorrect request/optional parameter on a directly called decorated function | `reportArgumentType` |
 | Unknown keyword on a directly called decorated function | `reportCallIssue` |
 
-`jobs.register(HEARTBEAT_JOB, …)` with a request-bearing callback is **not** listed here: Pyright 1.1.414 does not emit `reportArgumentType` for that call (runtime still rejects it). See [measured gaps](#measured-gaps-typingmeasured_gaps).
+The inferred `HEARTBEAT_JOB` now rejects `jobs.register(HEARTBEAT_JOB, …)` with a request-bearing callback. `producer_negative` checks missing, mistyped and unknown constructor fields, mixed forms, invalid `SubmitOptions`, and no-request registration.
 
 Run Pyright with failure on diagnostics, e.g. `pyright --outputjson` and assert error count for the deliberate mistakes only.
 
@@ -99,8 +103,10 @@ Probes record **EXPECTED** product targets vs **MEASURED** Pyright 1.1.414 (basi
 
 | Probe | EXPECTED (target) | MEASURED (baseline) |
 | --- | --- | --- |
-| `reveal_type(Job(..., request=..., result=...))` without `event=` | `Job[..., ..., None]` or explicit “no events” | `Job[..., ..., Unknown]` |
-| `jobs.register(HEARTBEAT_JOB, fn)` with `(request: None, context: …)` callback | `reportArgumentType` (handler mismatch) | No static diagnostic; `TypeError` at runtime (`validate_handler_signature`) |
+| Inferred `Job(..., request=..., result=...)` without `event=` | No declared events | Inferred `None` event slot |
+| `jobs.register(HEARTBEAT_JOB, fn)` with `(request: None, context: …)` callback | Reject wrong arity | `reportCallIssue` and `reportArgumentType` |
+| Manually widened `Job[Request, Result, Event]` | Preserve constructor keywords and handler registration | Explicit-object client only; constructor ParamSpec and checked registration unavailable |
+| Positional constructor-shaped `submit(value)` on a non-keyword-only request class | Reject | Runtime rejects; Pyright may accept through captured constructor ParamSpec |
 
 ## Wheel build and producer-only install (isolated from source layout)
 

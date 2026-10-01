@@ -2,6 +2,8 @@
 
 Implemented locally for [Validate payloads strictly before request construction](https://github.com/vschroeter/superjobs/issues/9). The preceding handler/interface iteration is committed as `ef6369f`. Keyword `JobClient.submit(**fields)` and optional `SubmitOptions` remain [Preserve request constructor typing and add optional SubmitOptions](https://github.com/vschroeter/superjobs/issues/8).
 
+Update, 2026-10-01: The #9 work was committed as `346d400`; the subsequent producer-interface slice adds typed keyword submission and `SubmitOptions`. Its independent checks are recorded in [producer constructor verification](producer-interface-verification.md). The paragraphs below retain the #9 iteration's original scope and measurements.
+
 ## Public behavior
 
 Built-in Pydantic, dataclass and plain-Python adapters share `superjobs.payload.strict`. Requests are checked before backend submission, results before successful completion, and application events before entering the observation batch. Event preparation preserves the validated object, including declared conversions, for both the in-memory and NATS paths. Nested mutated dataclasses and models created with `model_construct` are revalidated. Unknown object fields are forbidden, required fields stay required, defaults are validated, and nullable fields remain supported.

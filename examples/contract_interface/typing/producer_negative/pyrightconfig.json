@@ -1,0 +1,11 @@
+{
+  "include": ["check_types.py"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "extraPaths": [
+    "../../../../src",
+    "../../superjobs_contract_example/src"
+  ],
+  "venvPath": "../../../..",
+  "venv": ".venv"
+}

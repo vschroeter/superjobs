@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar, overload
+from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, overload
 
 from superjobs.jobs.handler_binding import attach_job_marker
 from superjobs.jobs.job_context import JobContext, ObservationPolicy
 from superjobs.jobs.retry_policy import RetryPolicy
 
 if TYPE_CHECKING:
-    from superjobs.jobs.job import Job
+    from superjobs.jobs.job import Job, NoRequestJob, RequestJob
     from superjobs.superjobs import SuperJobs
 
 ReqT = TypeVar("ReqT")
 FinalT = TypeVar("FinalT")
 InterT = TypeVar("InterT")
+ConstructorP = ParamSpec("ConstructorP")
 
 
 class _RequestCallback[Request, Result, Event, **Parameters, Return](Protocol):
@@ -71,7 +72,7 @@ class JobHandlerDecorator[Request, Result, Event](
 
 
 class JobNoRequestHandlerDecorator[Result, Event](_ContextDecorator[Result, Event]):
-    def __init__(self, job: Job[None, Result, Event]) -> None:
+    def __init__(self, job: Job[Any, Result, Event]) -> None:
         self._job = job
 
     def _bind(self, callback: Callable[..., Any]) -> None:
@@ -122,8 +123,13 @@ class RuntimeNoRequestHandlerDecorator[Result, Event](
 class JobHandlerDescriptor:
     @overload
     def __get__(
-        self, obj: Job[None, FinalT, InterT], owner: type[object] | None
+        self, obj: NoRequestJob[FinalT, InterT], owner: type[object] | None
     ) -> JobNoRequestHandlerDecorator[FinalT, InterT]: ...
+
+    @overload
+    def __get__(
+        self, obj: RequestJob[ReqT, FinalT, InterT, ConstructorP], owner: type[object] | None
+    ) -> JobHandlerDecorator[ReqT, FinalT, InterT]: ...
 
     @overload
     def __get__(
