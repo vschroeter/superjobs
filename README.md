@@ -74,3 +74,13 @@ to use an external broker, or `NATS_EXECUTABLE` for an offline binary path. See
 ```bash
 uv run pytest -m nats
 ```
+
+Verify installed shared contracts between separate producer and worker processes:
+
+```bash
+uv run python tools/verify_cross_program.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue12
+```
+
+This gate always owns its broker and fails missing infrastructure. See
+[cross-program verification](docs/design/cross-program-verification.md) for scenarios,
+isolation checks, failure diagnostics and measured results.

@@ -92,6 +92,18 @@ def load_producer_module(producer_only: Path) -> None:
     spec.loader.exec_module(module)
 
 
+def load_worker_module(worker_only: Path) -> None:
+    sys.path.insert(0, str(worker_only))
+    spec = importlib.util.find_spec("worker_handlers")
+    if spec is None:
+        raise OriginProbeError("worker_handlers must be importable in worker layout")
+    spec = importlib.util.spec_from_file_location("worker", worker_only / "worker_app.py")
+    if spec is None or spec.loader is None:
+        raise OriginProbeError("worker_app.py could not be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+
 def collect_evidence(producer_only: Path, repo_root: Path) -> dict[str, Any]:
     site_roots = site_package_roots()
     validate_install_metadata(site_roots, repo_root)
@@ -109,15 +121,41 @@ def collect_evidence(producer_only: Path, repo_root: Path) -> dict[str, Any]:
     }
 
 
+def collect_worker_evidence(worker_only: Path, repo_root: Path) -> dict[str, Any]:
+    site_roots = site_package_roots()
+    validate_install_metadata(site_roots, repo_root)
+    packages = [
+        validate_package_origin("superjobs", site_roots, repo_root=repo_root),
+        validate_package_origin("superjobs_contract_example", site_roots, repo_root=repo_root),
+    ]
+    load_worker_module(worker_only)
+    return {
+        "sys_version": sys.version,
+        "sys_executable": sys.executable,
+        "site_packages": [str(p) for p in site_roots],
+        "packages": packages,
+        "worker_only": str(worker_only.resolve()),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("producer_only", type=Path)
+    parser.add_argument("role_dir", type=Path)
     parser.add_argument("repo_root", type=Path)
+    parser.add_argument(
+        "--role",
+        choices=("producer", "worker"),
+        default="producer",
+        help="Which role layout to validate (default: producer).",
+    )
     args = parser.parse_args(argv)
     try:
-        evidence = collect_evidence(args.producer_only, args.repo_root)
+        if args.role == "worker":
+            evidence = collect_worker_evidence(args.role_dir, args.repo_root)
+        else:
+            evidence = collect_evidence(args.role_dir, args.repo_root)
     except OriginProbeError as exc:
         print(str(exc), file=sys.stderr)
         return 1

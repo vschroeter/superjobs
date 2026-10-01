@@ -28,4 +28,5 @@ asyncio_mode = "auto"
 markers = [
     "nats: integration tests requiring a live NATS JetStream server (fail when unavailable)",
     "contract_typing: contract-interface Pyright gate and wheel-origin checks (select with -m contract_typing)",
+    "cross_program: cross-program installed-wheel verification helpers (see tools/verify_cross_program.py)",
 ]

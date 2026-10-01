@@ -89,4 +89,6 @@ isolates resources and verifies cleanup/restart behavior (#10 and its narrow
 empty-completion-bucket fix #24). [The automated consumer gate](consumer-typing-verification.md)
 now checks exact source/wheel diagnostics and isolated installed runtime behavior
 on Python 3.12 and 3.14 (#11). Both slices were independently verified on Windows
-and Linux. Cross-process/recovery/required-CI work in #12–#15 remains open.
+and Linux. [The cross-program gate](cross-program-verification.md) now verifies installed
+producer/worker boundaries and ordinary behavior (#12) on both platforms with Python 3.12
+and 3.14. Crash recovery, broker persistence and required CI work in #13–#15 remain open.
