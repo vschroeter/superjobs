@@ -16,10 +16,12 @@ from scripts.dev_check import process_tree  # noqa: E402
 from scripts.dev_check.constants import INTEGRATION_STAGE_BUDGET_SECONDS  # noqa: E402
 from scripts.dev_check.orchestrator import run_stages  # noqa: E402
 from scripts.dev_check.stages import (  # noqa: E402
+    INTEGRATION_STAGES,
     StageOutcome,
     StageSpec,
     assess_required_pytest_junit,
     broker_restart_argv,
+    idle_outage_argv,
     contract_typing_argv,
     cross_program_argv,
     evaluate_pytest_stage,
@@ -258,6 +260,18 @@ def test_run_bounded_missing_command_returns_evidence(tmp_path: Path) -> None:
     assert result.stderr
 
 
+def test_integration_stages_include_idle_outage() -> None:
+    names = [stage.name for stage in INTEGRATION_STAGES]
+    assert names == [
+        "contract-typing",
+        "nats-pytest",
+        "cross-program",
+        "worker-recovery",
+        "broker-restart",
+        "idle-outage",
+    ]
+
+
 def test_integration_argv_uses_custom_artifact_dir(tmp_path: Path) -> None:
     run_dir = tmp_path / "artifacts"
     junit = integration_pytest_argv(REPO_ROOT, "3.12", run_dir)
@@ -270,6 +284,8 @@ def test_integration_argv_uses_custom_artifact_dir(tmp_path: Path) -> None:
     assert str(run_dir / "worker-recovery") in " ".join(recovery)
     restart = broker_restart_argv(REPO_ROOT, "3.12", run_dir)
     assert str(run_dir / "broker-restart") in " ".join(restart)
+    idle = idle_outage_argv(REPO_ROOT, "3.12", run_dir)
+    assert str(run_dir / "idle-outage") in " ".join(idle)
 
 
 def test_run_stages_sets_nats_log_dir(tmp_path: Path) -> None:

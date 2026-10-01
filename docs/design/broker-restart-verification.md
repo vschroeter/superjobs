@@ -63,9 +63,10 @@ stdlib scripts under `tests/support/broker_restart_regression/`. Resource oracle
 `test_empty_store_control_native` (`@pytest.mark.nats`) runs the CLI `--empty-store-control`
 path end-to-end.
 
-This slice does not cover uninterrupted application reconnection during outage (#20), required CI
-orchestration (#15), or power-loss/fsync guarantees. A failing guarantee should remain visible
-for a linked product fix rather than being weakened.
+Uninterrupted application reconnection during outage is covered separately in
+[idle-outage-verification.md](idle-outage-verification.md) (#20). This slice does not cover
+required CI orchestration (#15) or power-loss/fsync guarantees. A failing guarantee should remain
+visible for a linked product fix rather than being weakened.
 
 ## Independent verification (2026-10-01)
 

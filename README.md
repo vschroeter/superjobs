@@ -124,3 +124,12 @@ uv run python tools/verify_broker_restart.py --python 3.12 --python 3.14 --artif
 
 See [broker restart verification](docs/design/broker-restart-verification.md) for the scenario,
 broker resource evidence, and failure diagnostics.
+
+Verify idle producer and worker recovery after a short NATS outage:
+
+```bash
+uv run python tools/verify_idle_outage.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue20
+```
+
+See [idle outage verification](docs/design/idle-outage-verification.md) for reconnect checkpoints,
+handle retry semantics, and failure diagnostics.

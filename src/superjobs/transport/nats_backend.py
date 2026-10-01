@@ -45,6 +45,11 @@ from superjobs.transport.transport import Destination, Source, Transport
 
 logger = logging.getLogger(__name__)
 
+# FastStream StreamSubscriber.__aiter__ uses fetch(batch=1, timeout=None), which can block
+# indefinitely across broker loss. Use get_one with a bounded wait instead.
+_WORK_PULL_FETCH_TIMEOUT_SECONDS = 2.0
+_WORK_PULL_IDLE_SLEEP_SECONDS = 0.05
+
 
 class _NatsWorkSubscription(WorkSubscription):
     def __init__(
@@ -56,17 +61,23 @@ class _NatsWorkSubscription(WorkSubscription):
         self._backend = backend
         self._identity = identity
         self._subscriber = subscriber
-        self._iterator = cast(AsyncIterator[Any], subscriber.__aiter__())
         self._closed = False
 
     def __aiter__(self) -> _NatsWorkSubscription:
         return self
 
     async def __anext__(self) -> WorkItem:
-        if self._closed:
-            raise StopAsyncIteration
-        while True:
-            message = await anext(self._iterator)
+        while not self._closed:
+            message = await self._subscriber.get_one(
+                timeout=_WORK_PULL_FETCH_TIMEOUT_SECONDS,
+            )
+            if self._closed:
+                raise StopAsyncIteration
+            if message is None:
+                await asyncio.sleep(_WORK_PULL_IDLE_SLEEP_SECONDS)
+                if self._closed:
+                    raise StopAsyncIteration
+                continue
             try:
                 wire = _unpack(message.body)
                 job_id = str(wire["job_id"])
@@ -106,6 +117,8 @@ class _NatsWorkSubscription(WorkSubscription):
                     int(wire.get("attempt", 1)),
                     int(delivery_count or 1),
                 )
+                if self._closed:
+                    raise StopAsyncIteration
                 return WorkItem(
                     execution=execution,
                     attempt=attempt,
@@ -121,9 +134,12 @@ class _NatsWorkSubscription(WorkSubscription):
                         ),
                     ),
                 )
+            except StopAsyncIteration:
+                raise
             except Exception:
                 await message.reject()
                 continue
+        raise StopAsyncIteration
 
     async def close(self) -> None:
         if not self._closed:
