@@ -1,0 +1,99 @@
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - api_design
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    name: checks / fast (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Fast deterministic checks
+        run: >
+          uv run --isolated --no-project --with-editable .
+          --python ${{ matrix.python }}
+          --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0"
+          python -m scripts.dev_check fast
+      - name: Upload failure diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            dist/verification/dev-check/**
+
+  checks-fast:
+    name: checks / fast
+    runs-on: ubuntu-latest
+    needs: fast
+    if: always()
+    steps:
+      - name: Require successful fast matrix
+        shell: bash
+        run: |
+          if [ "${{ needs.fast.result }}" != "success" ]; then
+            echo "fast matrix result: ${{ needs.fast.result }}"
+            exit 1
+          fi
+
+  integration:
+    name: checks / integration (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Integration checks
+        run: >
+          uv run --isolated --no-project --with-editable .
+          --python ${{ matrix.python }}
+          --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0"
+          python -m scripts.dev_check integration
+      - name: Upload failure diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            dist/verification/dev-check/**
+
+  checks-integration:
+    name: checks / integration
+    runs-on: ubuntu-latest
+    needs: integration
+    if: always()
+    steps:
+      - name: Require successful integration matrix
+        shell: bash
+        run: |
+          if [ "${{ needs.integration.result }}" != "success" ]; then
+            echo "integration matrix result: ${{ needs.integration.result }}"
+            exit 1
+          fi
