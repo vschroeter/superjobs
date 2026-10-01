@@ -47,6 +47,12 @@ from superjobs.jobs import (
     RetryPolicy,
     submission_fingerprint,
 )
+from superjobs.payload import (
+    PayloadValidationError,
+    construct_payload,
+    construct_payload_for_type,
+    validate_payload,
+)
 from superjobs.superjobs import SuperJobs
 from superjobs.transport import (
     ExecutionRecord,
@@ -103,7 +109,11 @@ __all__ = [
     "NonRetryableError",
     "ObservationPolicy",
     "ObservationSink",
+    "PayloadValidationError",
     "ProgressSnapshot",
+    "construct_payload",
+    "construct_payload_for_type",
+    "validate_payload",
     "ResultExpiredError",
     "ResultRetention",
     "ResultTooLargeError",

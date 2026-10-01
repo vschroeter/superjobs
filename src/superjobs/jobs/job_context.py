@@ -291,7 +291,7 @@ class JobContext[InterT: Any]:
             raise RuntimeError("This context is not attached to a running execution")
         if self.job.event_codec is None:
             raise TypeError(f"Job {self.job} does not declare intermediate events")
-        self.job.event_codec.encode(event)
+        event = self.job.event_codec.prepare(event)
         await self._batcher.add_event(event)
 
     async def emit_event(self, event: InterT) -> None:
