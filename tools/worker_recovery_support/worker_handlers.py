@@ -6,11 +6,15 @@ import asyncio
 import os
 from pathlib import Path
 
-from superjobs import JobContext, SuperJobs
+from superjobs import FixedBackoff, JobContext, RetryPolicy, SuperJobs
 from superjobs_contract_example import ManifestRequest, ManifestResult
 
 from protocol import handler_entered_checkpoint, record_handler_invocation, write_checkpoint
-from scenario_jobs import after_completion_job, before_completion_job
+from scenario_jobs import (
+    after_completion_job,
+    after_retry_publication_job,
+    before_completion_job,
+)
 
 
 def _checkpoint_dir() -> Path:
@@ -76,4 +80,20 @@ def register_recovery_handlers(jobs: SuperJobs, run_id: str) -> None:
             context: JobContext[None],
         ) -> ManifestResult:
             _record_entry(job.name, context)
+            return ManifestResult(revision=f"recovery-{request.device_id}")
+
+    if scenario == "recovery_after_retry_publication":
+        job = after_retry_publication_job(run_id)
+
+        @jobs.handler(
+            job,
+            retry=RetryPolicy(max_attempts=2, backoff=FixedBackoff(0)),
+        )
+        async def after_retry_publication_handler(
+            request: ManifestRequest,
+            context: JobContext[None],
+        ) -> ManifestResult:
+            _record_entry(job.name, context)
+            if _worker_generation() == "1" and context.attempt == 1:
+                raise RuntimeError("planned first-attempt failure for retry recovery proof")
             return ManifestResult(revision=f"recovery-{request.device_id}")

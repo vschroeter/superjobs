@@ -6,20 +6,25 @@ import asyncio
 import os
 import sys
 import time
+from itertools import pairwise
 from pathlib import Path
 
 from faststream.nats import NatsBroker
 
-from superjobs import JobCompleted, JobSucceeded, SuperJobs
-from superjobs_contract_example import ManifestRequest, ManifestResult
-
+from superjobs import (
+    JobCompleted,
+    JobState,
+    JobSucceeded,
+    ObservationCursor,
+    SuperJobs,
+)
 from protocol import SUBMITTED, read_ready, ready_path, write_checkpoint
 from runtime_isolation import assert_producer_layout
 from queue_config import queue_config_for_run
-from scenario_jobs import after_completion_job, before_completion_job
 
 FLOW_TIMEOUT = 30.0
 RECOVER_TIMEOUT = 45.0
+RETRY_RECOVER_TIMEOUT = 30.0
 READY_POLL_INTERVAL = 0.05
 
 EXIT_OK = 0
@@ -50,14 +55,24 @@ async def _wait_for_worker_ready(state_dir: Path, run_id: str, timeout: float) -
 
 
 def _job_for_scenario(scenario: str, run_id: str):
+    from scenario_jobs import (
+        after_completion_job,
+        after_retry_publication_job,
+        before_completion_job,
+    )
+
     if scenario == "recovery_before_completion":
         return before_completion_job(run_id)
     if scenario == "recovery_after_completion":
         return after_completion_job(run_id)
+    if scenario == "recovery_after_retry_publication":
+        return after_retry_publication_job(run_id)
     raise AssertionError(f"unknown scenario {scenario!r}")
 
 
 async def _phase_submit(jobs: SuperJobs, scenario: str, run_id: str, state_dir: Path) -> None:
+    from superjobs_contract_example import ManifestRequest
+
     job = _job_for_scenario(scenario, run_id)
     handle = await jobs.client(job).submit(ManifestRequest(device_id="recovery-device"))
     write_checkpoint(
@@ -70,28 +85,113 @@ async def _phase_submit(jobs: SuperJobs, scenario: str, run_id: str, state_dir: 
     print(f"producer submitted execution_id={handle.id}", flush=True)
 
 
+def _recover_timeout_for_scenario(scenario: str) -> float:
+    if scenario == "recovery_after_retry_publication":
+        return RETRY_RECOVER_TIMEOUT
+    return RECOVER_TIMEOUT
+
+
+def _phase_timeout_seconds(scenario: str, phase: str) -> float:
+    if phase != "recover":
+        return FLOW_TIMEOUT
+    recover_timeout = _recover_timeout_for_scenario(scenario)
+    if scenario == "recovery_after_retry_publication":
+        return recover_timeout
+    return recover_timeout + 5.0
+
+
+def _assert_strictly_increasing_sequences(events: list) -> None:
+    sequences = [event.sequence for event in events]
+    if len(sequences) < 2:
+        return
+    for previous, current in pairwise(sequences):
+        if current <= previous:
+            raise AssertionError(
+                f"observation sequences must increase strictly, saw {sequences}",
+            )
+
+
+async def _assert_observation_closure(handle, *, timeout: float) -> list:
+    async with asyncio.timeout(timeout):
+        wrapped = [event async for event in handle.events()]
+    if not wrapped:
+        raise AssertionError("missing observation stream after recovery")
+    _assert_strictly_increasing_sequences(wrapped)
+    if not isinstance(wrapped[-1].data, JobCompleted):
+        raise AssertionError(
+            f"expected JobCompleted terminal event, got {wrapped[-1].data!r}",
+        )
+    cursor = ObservationCursor(sequence=wrapped[0].sequence)
+    async with asyncio.timeout(timeout):
+        replayed = [event async for event in handle.events(after=cursor)]
+    expected_tail = wrapped[1:]
+    if [event.sequence for event in replayed] != [
+        event.sequence for event in expected_tail
+    ]:
+        raise AssertionError("cursor replay returned unexpected observation sequences")
+    if [event.data for event in replayed] != [event.data for event in expected_tail]:
+        raise AssertionError("cursor replay returned unexpected observation payloads")
+    return wrapped
+
+
+async def _assert_result_and_succeeded_outcome(
+    handle,
+    expected,
+    *,
+    timeout: float,
+    assert_completed_status: bool = False,
+) -> None:
+    result = await handle.result(wait_timeout=timeout)
+    if result != expected:
+        raise AssertionError(f"unexpected result {result!r}, expected {expected!r}")
+    if assert_completed_status:
+        status = await handle.status()
+        if status.state is not JobState.COMPLETED:
+            raise AssertionError(
+                f"expected COMPLETED status after recovery, got {status.state!r}",
+            )
+    outcome = await handle.outcome(wait_timeout=timeout)
+    if not isinstance(outcome, JobSucceeded):
+        raise AssertionError(f"expected JobSucceeded outcome, got {outcome!r}")
+    if outcome.result != expected:
+        raise AssertionError(
+            f"unexpected outcome.result {outcome.result!r}, expected {expected!r}",
+        )
+
+
 async def _phase_recover(
     jobs: SuperJobs,
     scenario: str,
     run_id: str,
     execution_id: str,
 ) -> None:
+    from superjobs_contract_example import ManifestResult
+
     job = _job_for_scenario(scenario, run_id)
     handle = await jobs.client(job).get(execution_id)
     if handle.id != execution_id:
         raise AssertionError(f"handle id {handle.id!r} != expected {execution_id!r}")
-    result = await handle.result(wait_timeout=RECOVER_TIMEOUT)
     expected = ManifestResult(revision="recovery-recovery-device")
-    if result != expected:
-        raise AssertionError(f"unexpected result {result!r}, expected {expected!r}")
-    outcome = await handle.outcome(wait_timeout=RECOVER_TIMEOUT)
-    if not isinstance(outcome, JobSucceeded):
-        raise AssertionError(f"expected JobSucceeded outcome, got {outcome!r}")
-    events = [event.data async for event in handle.events()]
-    if not events:
-        raise AssertionError("missing observation stream after recovery")
-    if not isinstance(events[-1], JobCompleted):
-        raise AssertionError(f"expected JobCompleted terminal event, got {events[-1]!r}")
+    recover_timeout = _recover_timeout_for_scenario(scenario)
+    if scenario == "recovery_after_retry_publication":
+        await _assert_result_and_succeeded_outcome(
+            handle,
+            expected,
+            timeout=recover_timeout,
+            assert_completed_status=True,
+        )
+        await _assert_observation_closure(handle, timeout=recover_timeout)
+    else:
+        await _assert_result_and_succeeded_outcome(
+            handle,
+            expected,
+            timeout=recover_timeout,
+        )
+        events = [event.data async for event in handle.events()]
+        if not events:
+            raise AssertionError("missing observation stream after recovery")
+        if not isinstance(events[-1], JobCompleted):
+            raise AssertionError(f"expected JobCompleted terminal event, got {events[-1]!r}")
     print(f"producer recovered execution_id={execution_id}", flush=True)
 
 
@@ -100,7 +200,7 @@ async def _run() -> None:
     run_id = _require_env("SUPERJOBS_CROSS_RUN_ID")
     scenario = _require_env("SUPERJOBS_CROSS_SCENARIO")
     phase = _require_env("SUPERJOBS_RECOVERY_PHASE")
-    phase_timeout = RECOVER_TIMEOUT + 5.0 if phase == "recover" else FLOW_TIMEOUT
+    phase_timeout = _phase_timeout_seconds(scenario, phase)
     async with asyncio.timeout(phase_timeout):
         assert_producer_layout(Path(__file__).resolve().parent)
 

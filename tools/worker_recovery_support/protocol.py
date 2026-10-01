@@ -17,6 +17,7 @@ PHASE_STOP = "stop"
 HANDLER_ENTERED = "handler_entered"
 SUBMITTED = "submitted"
 COMPLETION_SAVED = "completion_saved"
+RETRY_PUBLISHED = "retry_published"
 REPLACEMENT_ACK = "replacement_ack"
 
 
@@ -47,6 +48,8 @@ class CheckpointMarker:
     terminal_state: str | None = None
     terminal_event_published: bool | None = None
     completion_state: str | None = None
+    delivery_attempt: int | None = None
+    retry_target_attempt: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +178,8 @@ def write_checkpoint(
     terminal_state: str | None = None,
     terminal_event_published: bool | None = None,
     completion_state: str | None = None,
+    delivery_attempt: int | None = None,
+    retry_target_attempt: int | None = None,
 ) -> None:
     payload: dict[str, Any] = {"run_id": run_id, "checkpoint": checkpoint}
     if job is not None:
@@ -191,6 +196,10 @@ def write_checkpoint(
         payload["terminal_event_published"] = terminal_event_published
     if completion_state is not None:
         payload["completion_state"] = completion_state
+    if delivery_attempt is not None:
+        payload["delivery_attempt"] = delivery_attempt
+    if retry_target_attempt is not None:
+        payload["retry_target_attempt"] = retry_target_attempt
     _write_json(checkpoint_path(state_dir, checkpoint), payload)
 
 
@@ -230,6 +239,12 @@ def read_checkpoint(state_dir: Path, name: str) -> CheckpointMarker:
     completion_state = payload.get("completion_state")
     if completion_state is not None and not isinstance(completion_state, str):
         raise ProtocolError(f"checkpoint {name!r} has invalid completion_state field")
+    delivery_attempt = payload.get("delivery_attempt")
+    if delivery_attempt is not None and not isinstance(delivery_attempt, int):
+        raise ProtocolError(f"checkpoint {name!r} has invalid delivery_attempt field")
+    retry_target_attempt = payload.get("retry_target_attempt")
+    if retry_target_attempt is not None and not isinstance(retry_target_attempt, int):
+        raise ProtocolError(f"checkpoint {name!r} has invalid retry_target_attempt field")
     return CheckpointMarker(
         run_id=run_id,
         checkpoint=checkpoint,
@@ -242,6 +257,10 @@ def read_checkpoint(state_dir: Path, name: str) -> CheckpointMarker:
             terminal_event_published if isinstance(terminal_event_published, bool) else None
         ),
         completion_state=completion_state if isinstance(completion_state, str) else None,
+        delivery_attempt=delivery_attempt if isinstance(delivery_attempt, int) else None,
+        retry_target_attempt=(
+            retry_target_attempt if isinstance(retry_target_attempt, int) else None
+        ),
     )
 
 

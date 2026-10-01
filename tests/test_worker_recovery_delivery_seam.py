@@ -14,7 +14,12 @@ from superjobs.jobs.job_identity import JobIdentity
 from superjobs.transport.backend import ExecutionRecord
 from superjobs.transport.nats_backend import NatsJobBackend
 
-from tools.worker_recovery_support.blocking_backend import BlockingAfterCompletionBackend
+from superjobs.transport.implementations.nats import NatsDelivery
+
+from tools.worker_recovery_support.blocking_backend import (
+    BlockingAfterCompletionBackend,
+    BlockingAfterRetryPublicationBackend,
+)
 from tools.worker_recovery_support.delivery_seam import (
     _AckCheckpointDelivery,
     _AckCheckpointWorkSubscription,
@@ -319,3 +324,119 @@ async def test_completion_saved_only_after_delegated_write(
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+
+@pytest.mark.asyncio
+async def test_retry_published_only_after_delegated_publish_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SUPERJOBS_CROSS_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("SUPERJOBS_CROSS_RUN_ID", "run-1")
+    monkeypatch.setenv("SUPERJOBS_WORKER_GENERATION", "1")
+    gate = asyncio.Event()
+    entered = asyncio.Event()
+    checkpoint_written = asyncio.Event()
+    from tools.worker_recovery_support import blocking_backend as blocking_module
+    original_checkpoint = blocking_module.write_checkpoint
+
+    def record_checkpoint(*args, **kwargs):
+        original_checkpoint(*args, **kwargs)
+        checkpoint_written.set()
+
+    monkeypatch.setattr(blocking_module, "write_checkpoint", record_checkpoint)
+    execution = _sample_execution()
+
+    async def delegated_publish_retry(
+        self,
+        execution: ExecutionRecord,
+        attempt: int,
+        delay: timedelta | None,
+    ) -> None:
+        entered.set()
+        await gate.wait()
+
+    backend = BlockingAfterRetryPublicationBackend(MagicMock(), None)
+    backend._active_delivery_attempt = 1
+    with patch.object(NatsJobBackend, "_publish_retry", delegated_publish_retry):
+        task = asyncio.create_task(
+            backend._publish_retry(execution, 2, timedelta(0)),
+        )
+        await asyncio.wait_for(entered.wait(), 1)
+        assert not wr_protocol.checkpoint_path(tmp_path, wr_protocol.RETRY_PUBLISHED).is_file()
+        gate.set()
+        await asyncio.wait_for(checkpoint_written.wait(), 1)
+        marker = wr_protocol.read_checkpoint(tmp_path, wr_protocol.RETRY_PUBLISHED)
+        assert marker.execution_id == "exec-1"
+        assert marker.delivery_attempt == 1
+        assert marker.retry_target_attempt == 2
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_native_delivery_ack_blocked_while_retry_publication_seam_blocks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SUPERJOBS_CROSS_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("SUPERJOBS_CROSS_RUN_ID", "run-1")
+    monkeypatch.setenv("SUPERJOBS_WORKER_GENERATION", "1")
+    execution = _sample_execution()
+    backend = BlockingAfterRetryPublicationBackend(MagicMock(), None)
+    backend._active_delivery_attempt = 1
+    publish_entered = asyncio.Event()
+
+    async def immediate_publish_retry(
+        self,
+        execution: ExecutionRecord,
+        attempt: int,
+        delay: timedelta | None,
+    ) -> None:
+        publish_entered.set()
+
+    message = MagicMock()
+    message.ack_sync = AsyncMock()
+    with patch.object(NatsJobBackend, "_publish_retry", immediate_publish_retry):
+        async def publisher(attempt: int, delay: timedelta | None) -> None:
+            await backend._publish_retry(execution, attempt, delay)
+
+        delivery = NatsDelivery(message, attempt=1, retry_publisher=publisher)
+        retry_task = asyncio.create_task(
+            delivery.retry(delay=timedelta(0), attempt=2),
+        )
+        await asyncio.wait_for(publish_entered.wait(), 1)
+        marker = wr_protocol.read_checkpoint(tmp_path, wr_protocol.RETRY_PUBLISHED)
+        assert marker.delivery_attempt == 1
+        message.ack_sync.assert_not_awaited()
+        retry_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await retry_task
+        message.ack_sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_retry_published_absent_when_delegated_publish_retry_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SUPERJOBS_CROSS_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("SUPERJOBS_CROSS_RUN_ID", "run-1")
+    monkeypatch.setenv("SUPERJOBS_WORKER_GENERATION", "1")
+    execution = _sample_execution()
+    backend = BlockingAfterRetryPublicationBackend(MagicMock(), None)
+    backend._active_delivery_attempt = 1
+
+    async def failing_publish_retry(
+        self,
+        execution: ExecutionRecord,
+        attempt: int,
+        delay: timedelta | None,
+    ) -> None:
+        raise RuntimeError("publish retry failed")
+
+    with patch.object(NatsJobBackend, "_publish_retry", failing_publish_retry):
+        with pytest.raises(RuntimeError, match="publish retry failed"):
+            await backend._publish_retry(execution, 2, timedelta(0))
+    assert not wr_protocol.checkpoint_path(tmp_path, wr_protocol.RETRY_PUBLISHED).is_file()

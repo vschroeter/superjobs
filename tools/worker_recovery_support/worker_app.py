@@ -11,7 +11,11 @@ from faststream.nats import NatsBroker
 
 from superjobs import SuperJobs
 
-from blocking_backend import BlockingAfterCompletionBackend
+from blocking_backend import (
+    SCENARIO_AFTER_RETRY_PUBLICATION,
+    BlockingAfterCompletionBackend,
+    BlockingAfterRetryPublicationBackend,
+)
 from delivery_seam import AckCheckpointBackend
 from protocol import assert_ready_absent, read_worker_stop, stop_path, write_ready
 from queue_config import queue_config_for_run
@@ -58,6 +62,8 @@ async def _run() -> None:
     worker_generation = os.environ.get("SUPERJOBS_WORKER_GENERATION", "1")
     if scenario == "recovery_after_completion":
         inner = BlockingAfterCompletionBackend(broker, queue_config)
+    elif scenario == SCENARIO_AFTER_RETRY_PUBLICATION and worker_generation == "1":
+        inner = BlockingAfterRetryPublicationBackend(broker, queue_config)
     else:
         from superjobs.transport import NatsJobBackend
 
