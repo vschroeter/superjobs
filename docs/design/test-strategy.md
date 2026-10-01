@@ -91,4 +91,6 @@ now checks exact source/wheel diagnostics and isolated installed runtime behavio
 on Python 3.12 and 3.14 (#11). Both slices were independently verified on Windows
 and Linux. [The cross-program gate](cross-program-verification.md) now verifies installed
 producer/worker boundaries and ordinary behavior (#12) on both platforms with Python 3.12
-and 3.14. Crash recovery, broker persistence and required CI work in #13–#15 remain open.
+and 3.14. [The worker recovery gate](worker-recovery-verification.md) proves controlled kills
+before and after durable completion (#13) on the same platform/runtime matrix. Broker
+persistence and required CI work in #14–#15 remain open.

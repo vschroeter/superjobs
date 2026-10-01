@@ -84,3 +84,12 @@ uv run python tools/verify_cross_program.py --python 3.12 --python 3.14 --artifa
 This gate always owns its broker and fails missing infrastructure. See
 [cross-program verification](docs/design/cross-program-verification.md) for scenarios,
 isolation checks, failure diagnostics and measured results.
+
+Verify worker crash recovery before and after durable completion:
+
+```bash
+uv run python tools/verify_worker_recovery.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue13
+```
+
+See [worker recovery verification](docs/design/worker-recovery-verification.md) for scenarios,
+checkpoints, and evidence retention.
