@@ -542,11 +542,24 @@ def test_probe_role_dependency_versions_reads_installed_packages() -> None:
     assert versions["superjobs"] not in ("unknown", "missing")
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows drive-letter semantics")
 def test_broker_storage_unknown_off_c_drive() -> None:
     hardware = {"c_drive_storage_medium": "ssd", "c_drive_storage_evidence": "C: maps"}
-    medium, evidence = broker_storage_for_path(Path("D:/nats/store"), hardware)
+    store = Path("D:/nats/store")
+    assert store.drive.upper() == "D:"
+    medium, evidence = broker_storage_for_path(store, hardware)
     assert medium == "unknown"
     assert "C: inference only" in evidence
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths have no drive letters")
+def test_broker_storage_unknown_no_drive_letter() -> None:
+    hardware = {"c_drive_storage_medium": "ssd", "c_drive_storage_evidence": "C: maps"}
+    store = Path("/var/lib/nats/store")
+    assert not store.drive
+    medium, evidence = broker_storage_for_path(store, hardware)
+    assert medium == "unknown"
+    assert "no drive letter" in evidence
 
 
 def _synthetic_baseline_sample(
