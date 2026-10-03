@@ -34,7 +34,7 @@ DEFAULT_ARTIFACT_ROOT = "dist/verification/dev-check"
 # Documented example minor for copy-paste CI-style commands (matrix cells pass their own minor).
 UV_ISOLATED_EXAMPLE_PYTHON = "3.12"
 
-# CI / docs: isolated uv environment with worktree source and test deps (see dev-checks-verification.md).
+# CI / docs: isolated uv environment with worktree source and test deps (see docs/development.md).
 UV_ISOLATED_RUN_CMD = (
     "uv run --isolated --no-project --with-editable . "
     f'--python {UV_ISOLATED_EXAMPLE_PYTHON} '

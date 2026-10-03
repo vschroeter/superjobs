@@ -1,6 +1,6 @@
 # Contract-interface example
 
-Runnable sketch for shared **contract packages**, producer/worker split, and measured vs proposed typing guarantees. Design discussion: `docs/design/contract-handler-interface.md`.
+Runnable sketch for shared **contract packages**, producer/worker split, and measured typing guarantees. API and decisions: [docs/api.md](../../docs/api.md), [docs/adr/](../../docs/adr/README.md).
 
 ## Dependencies
 

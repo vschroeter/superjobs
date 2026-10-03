@@ -1,5 +1,12 @@
 # Contract divergence detection across independent processes
 
+> **Historical status (2026-10-03):** Research for decision #4 (2026-09-29).
+> Proposal sections describe a **selected direction**, not implemented behavior.
+> Normative current state: [ADR 0003](../adr/0003-cross-process-contract-compatibility.md),
+> [api.md](../api.md). This file retains primary-source reasoning and links; it
+> does **not** claim measured fingerprint hashing experiments were run in this
+> repository.
+
 Research for decision #4, 2026-09-29. Everything under "Proposal" is a design proposal, not implemented behavior.
 
 ## Current source guarantees

@@ -1,0 +1,251 @@
+# SuperJobs public API
+
+Reference branch: **`api_design`** at **`04f24f2`**. Domain language:
+[CONTEXT.md](../CONTEXT.md). Architectural decisions: [adr/](adr/README.md).
+Runnable contracts: [examples/contract_interface/](../examples/contract_interface/).
+
+## Implemented vs selected / not implemented
+
+| Area | Status |
+| --- | --- |
+| Shared contract packages, handler registration, async submit/observe | **Implemented** |
+| `SubmitOptions`, keyword request construction (`RequestJob`), strict payload validation | **Implemented** |
+| `JobOutcome` narrowing, typed `JobContext` event parameter | **Implemented** |
+| Pyright **1.1.414**, `basic`, static target **3.12** on public consumer fixtures | **Measured guarantee** (not strict/mypy proof) |
+| Versioned descriptors, deterministic fingerprints, execution/manifest enforcement | **Selected, not implemented** ([#29](https://github.com/vschroeter/superjobs/issues/29), [#30](https://github.com/vschroeter/superjobs/issues/30), [Wayfinder #28](https://github.com/vschroeter/superjobs/issues/28)) |
+| Blocking sync producer helpers with continuous runtime lifecycle | **Direction only** ([#36](https://github.com/vschroeter/superjobs/issues/36)) |
+| Dependency-sensitive strict validation guard | **Future** ([#32](https://github.com/vschroeter/superjobs/issues/32)) |
+| Presence-aware constructor/handler typing refinements | **Open** ([#31](https://github.com/vschroeter/superjobs/issues/31)) |
+
+## Job contracts
+
+A `Job` binds a stable name and version to optional request, final result, and
+intermediate event payload types. Constructor inference on Python **3.12+** fills
+`None` for omitted slots.
+
+| Pattern | Request | Result | Events | Producer `submit` |
+| --- | --- | --- | --- | --- |
+| Full manifest | typed | typed | typed | `submit(ManifestRequest(...))` or keywords |
+| No application events | typed | typed | none (`event=None`) | `submit(...)` |
+| Telemetry-style | typed | none (`result=None`) | none | `submit(TelemetrySample(...))`; handler returns `None` |
+| Heartbeat-style | none (`request=None`) | typed | none | `submit()` or `submit(SubmitOptions(...))` |
+
+Nullable **fields** inside a declared request type are allowed. Omitting the whole
+request **slot** is different from a nullable request model.
+
+## Producer submission
+
+```python
+from superjobs import SubmitOptions
+
+client = jobs.client(MANIFEST_JOB)
+
+handle = await client.submit(ManifestRequest(device_id="sensor-17"))
+handle = await client.submit(device_id="sensor-17")  # RequestJob keyword path
+handle = await client.submit(
+    SubmitOptions(timeout=30.0, idempotency_key="k1"),
+    device_id="sensor-17",
+)
+handle = await client.submit(
+    ManifestRequest(device_id="sensor-17"),
+    options=SubmitOptions(job_id="exec-1"),
+)
+```
+
+`SubmitOptions` fields: `idempotency_key`, `job_id`, `timeout`, `deadline`,
+`caller_scope`. Legacy keyword aliases on `submit()` remain for compatibility;
+mixing a `SubmitOptions` instance with legacy option values is rejected.
+
+`client.run(...)` is submit plus `result()` in one call. `client.get(job_id)` and
+`client.handle(job_id)` reconstruct a public handle for an existing execution.
+
+## Handler rules
+
+- Every handler receives **`JobContext`**; with a request, `(request, context)`.
+- One active handler per job in a worker registry.
+- Register with `@jobs.handler(job)` or `jobs.register(job, callback)`. Alternatively,
+  `@job.handler` marks the callback's contract association, then
+  `jobs.register(callback)` activates it in a runtime. Choose one startup form.
+- `context.emit` requires a declared event type on the job; forbidden when
+  `event=None`.
+- Handlers for `result=None` jobs must return `None` explicitly or implicitly.
+
+Typed context example:
+
+```python
+@jobs.handler(MANIFEST_JOB)
+async def manifest(
+    request: ManifestRequest,
+    context: JobContext[ManifestEvent],
+) -> ManifestResult:
+    await context.emit(ManifestEvent(stage="published"))
+    return ManifestResult(revision=request.device_id)
+```
+
+## Observation and durability semantics
+
+- **At-least-once** execution: duplicate attempts before durable completion are
+  allowed; design handlers to be idempotent.
+- **Progress** is latest-value-wins; logs and intermediate application events keep
+  order within retention.
+- **Worker loss** may drop in-flight intermediate observations; proved recovery
+  scopes preserve authoritative final outcomes and allow handle reconstruction.
+- **Retention limits** can yield expired observation cursors on replay (`events(after=...)`).
+- **Outages**: transport calls may fail; SuperJobs does not auto-resubmit. Retry
+  reads on the same handle; uncertain submits reuse stable identifiers and scope
+  (see [ADR 0005](adr/0005-broker-outage-retry-and-optional-stress.md)).
+- **Fingerprints / shared manifest**: not enforced at runtime today.
+
+## Strict validation
+
+Request, result, and event payloads are validated at the SuperJobs boundary
+(strict by default). Invalid producer input fails before submission. Invalid
+handler outputs surface as failed executions. Revalidation applies to explicit
+objects passed to `submit`; values already coerced by application code before
+construction cannot be recovered. Mixing an explicit request object with
+constructor keywords is rejected.
+
+Pydantic `BaseModel` and dataclass payloads are supported; unknown keyword
+arguments are rejected when keyword submission is used. Details:
+[payload-validation.md](payload-validation.md).
+
+## Static typing limits (Pyright 1.1.414, basic, target 3.12)
+
+Measured on `examples/contract_interface/typing/` and
+`tools/verify_contract_typing.py` (source and installed wheels must agree).
+
+### Keyword-only request DTOs and inferred job success
+
+```python
+from dataclasses import dataclass
+
+from superjobs import Job, SuperJobs
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ManifestRequest:
+    device_id: str
+
+@dataclass(frozen=True, slots=True)
+class ManifestResult:
+    revision: str
+
+@dataclass(frozen=True, slots=True)
+class ManifestEvent:
+    stage: str
+
+MANIFEST_JOB = Job(
+    "examples.contract.manifest",
+    version="v1",
+    request=ManifestRequest,
+    result=ManifestResult,
+    event=ManifestEvent,
+)
+
+async def producer(jobs: SuperJobs) -> None:
+    client = jobs.client(MANIFEST_JOB)
+    await client.submit(device_id="sensor-17")  # keyword path type-checks
+```
+
+### Widening to `Job[Req, Res, Event]` — explicit object only
+
+```python
+from superjobs import Job, SuperJobs
+
+# ManifestRequest / ManifestResult / ManifestEvent as above.
+
+async def through_base_annotation(
+    jobs: SuperJobs,
+    job: Job[ManifestRequest, ManifestResult, ManifestEvent],
+) -> None:
+    client = jobs.client(job)
+    await client.submit(ManifestRequest(device_id="ok"))  # explicit object OK
+    await client.submit(device_id="lost")  # intentional negative: reportCallIssue
+```
+
+### Explicit `RequestJob[..., ...]` / `NoRequestJob` handler shapes
+
+Payload types (`ManifestRequest`, `ManifestResult`, `ManifestEvent`) are defined in
+the preceding example.
+
+```python
+from dataclasses import dataclass
+
+from superjobs import Job, JobContext, NoRequestJob, RequestJob, SuperJobs
+
+@dataclass(frozen=True, slots=True)
+class HeartbeatResult:
+    ok: bool
+
+HEARTBEAT_JOB = Job("examples.contract.heartbeat", version="v1", result=HeartbeatResult)
+
+ExplicitManifest: RequestJob[
+    ManifestRequest, ManifestResult, ManifestEvent, ...
+] = MANIFEST_JOB  # ellipsis preserves handler checks; loses named submit keywords
+
+
+def register(jobs: SuperJobs) -> None:
+    @jobs.handler(ExplicitManifest)
+    async def manifest(
+        request: ManifestRequest,
+        context: JobContext[ManifestEvent],
+    ) -> ManifestResult:
+        await context.emit(ManifestEvent(stage="published"))
+        return ManifestResult(revision=request.device_id)
+
+    NoRequest: NoRequestJob[HeartbeatResult, None] = HEARTBEAT_JOB
+
+    @jobs.handler(NoRequest)
+    async def heartbeat(context: JobContext[None]) -> HeartbeatResult:
+        return HeartbeatResult(ok=True)
+
+
+def register_widened(
+    jobs: SuperJobs,
+    job: Job[ManifestRequest, ManifestResult, ManifestEvent],
+) -> None:
+    @jobs.handler(job)  # intentional negative: widened Job cannot select a handler overload
+    async def through_base(
+        request: ManifestRequest,
+        context: JobContext[ManifestEvent],
+    ) -> ManifestResult:
+        return ManifestResult(revision=request.device_id)
+```
+
+### Positional dataclass misuse (static vs runtime)
+
+```python
+@dataclass(frozen=True, slots=True)  # not kw_only
+class PositionalRequest:
+    device_id: str
+
+POSITIONAL_JOB = Job("probe.positional", request=PositionalRequest, result=ManifestResult)
+
+async def misleading_static(jobs: SuperJobs) -> None:
+    client = jobs.client(POSITIONAL_JOB)
+    await client.submit("device-id")  # intentional negative: may type-check; runtime rejects
+    await client.submit(PositionalRequest(device_id="device-id"))  # supported explicit object
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SafeRequest:
+    device_id: str
+
+SAFE_JOB = Job("probe.safe", request=SafeRequest, result=ManifestResult)
+
+async def safe_static(jobs: SuperJobs) -> None:
+    await jobs.client(SAFE_JOB).submit("device-id")  # intentional negative: reportArgumentType
+```
+
+Upgrade Pyright only by changing the pinned version in `tools/verify_contract_typing.py`
+and refreshing expected diagnostics after review.
+
+Historical probe notes: [research/historical-typing-and-validation-notes.md](research/historical-typing-and-validation-notes.md).
+
+## Runtime lifecycle
+
+NATS programs typically `await jobs.start()`, run until shutdown, then
+`await jobs.stop()`. `async with jobs:` is supported. Workers must keep the
+runtime alive while consumers process work (see
+[examples/contract_interface/worker.py](../examples/contract_interface/worker.py)).
+
+`SuperJobs(transport=InMemoryTransport())` backs fast deterministic tests without
+a broker.

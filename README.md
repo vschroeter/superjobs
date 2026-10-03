@@ -1,135 +1,164 @@
 # SuperJobs
 
+**Pre-alpha.** Requires **Python 3.12+**.
+
 SuperJobs provides typed, durable background-job executions over NATS JetStream.
-Handlers and clients use the same `SuperJobs` runtime, while a job definition
-keeps its name, version, request, result, and optional event contracts together.
+Producers and workers are separate processes; each needs a **running JetStream-enabled
+NATS server** reachable from both programs (not bundled with the library).
+Domain terms live in [CONTEXT.md](CONTEXT.md). API behavior, typing limits,
+developer checks, and measured verification are documented under
+[docs/](docs/README.md).
 
-## Define and handle a job
+Producers and workers are **separate programs**. Each process owns its own
+`SuperJobs` runtime and broker connection. Both import a shared contract module
+(for example `my_contracts.py` or an installable contract package) with job
+constants and payload types; workers register handlers against those constants
+without exposing implementation code to producers.
+
+## 1. Job definition
+
+Define payload types and `Job` constants in a package both sides import:
 
 ```python
-from faststream.nats import NatsBroker
-from pydantic import BaseModel
+from dataclasses import dataclass
 
-from superjobs import Job, JobContext, SuperJobs
-
-
-class GenerateRequest(BaseModel):
-    count: int
+from superjobs import Job
 
 
-class GenerateResult(BaseModel):
-    generated: int
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ManifestRequest:
+    device_id: str
 
 
-generate = Job(
-    "example.generate",
+@dataclass(frozen=True, slots=True)
+class ManifestResult:
+    revision: str
+
+
+@dataclass(frozen=True, slots=True)
+class ManifestEvent:
+    stage: str
+
+
+MANIFEST_JOB = Job(
+    "examples.contract.manifest",
     version="v1",
-    request=GenerateRequest,
-    result=GenerateResult,
+    request=ManifestRequest,
+    result=ManifestResult,
+    event=ManifestEvent,
 )
-broker = NatsBroker("nats://localhost:4222")
-jobs = SuperJobs(broker=broker)
-
-
-@jobs.handler(generate, concurrency=4)
-async def generate_handler(
-    request: GenerateRequest,
-    context: JobContext,
-) -> GenerateResult:
-    await context.log("generation started")
-    return GenerateResult(generated=request.count)
 ```
 
-## Submit and observe
+Omitted `request`, `result`, or `event` means **no slot** for that payload (not an
+unspecified generic). See [docs/api.md](docs/api.md) for the four supported shapes,
+strict validation, and static typing limits.
+
+Runnable shared-contract layout: [examples/contract_interface/](examples/contract_interface/).
+
+## 2. Handling
+
+Workers register exactly one handler per job and always receive `JobContext`:
 
 ```python
-async with jobs:
-    client = jobs.client(generate)
-    handle = await client.submit(
-        GenerateRequest(count=10),
-        idempotency_key="request-123",
-    )
-    result = await handle
+import asyncio
 
-    async for event in handle.events():
-        print(event.sequence, event.data)
+from faststream.nats import NatsBroker
+
+from superjobs import JobContext, SuperJobs
+from my_contracts import MANIFEST_JOB, ManifestEvent, ManifestRequest, ManifestResult
+
+
+async def main() -> None:
+    jobs = SuperJobs(broker=NatsBroker("nats://localhost:4222"))
+    register_handlers(jobs)
+    await jobs.start()
+    try:
+        await asyncio.Event().wait()  # keep the runtime alive for NATS consumers
+    finally:
+        await jobs.stop()
+
+
+def register_handlers(jobs: SuperJobs) -> None:
+    @jobs.handler(MANIFEST_JOB, concurrency=4)
+    async def manifest(
+        request: ManifestRequest,
+        context: JobContext[ManifestEvent],
+    ) -> ManifestResult:
+        await context.emit(ManifestEvent(stage="validated"))
+        return ManifestResult(revision=f"{request.device_id}-r1")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-`submit()` returns a reusable handle with `status()`, `result()`, `outcome()`,
-`cancel()`, and replayable `events()`. Execution is at least once: handlers
-should make external side effects idempotent. Progress is latest-value-wins;
-logs and intermediate events remain ordered and are batched internally.
+Handlers **must** take `JobContext`. Jobs without a request use `(context,) -> ...`.
+Jobs without a final result type must return `None`. Jobs without an event slot
+must not call `context.emit` with application events (logs and system observations
+remain available).
 
-For deterministic tests, inject `InMemoryTransport`:
+## 3. Submit + Observation
+
+Producers use `jobs.client(job)` after the runtime is started. Submission supports
+explicit request objects, constructor keywords (when the job uses a `RequestJob`),
+and `SubmitOptions` for execution identity and deadlines:
 
 ```python
+import asyncio
+
+from faststream.nats import NatsBroker
+
+from superjobs import SubmitOptions, SuperJobs
+from my_contracts import MANIFEST_JOB, ManifestRequest
+
+
+async def main() -> None:
+    jobs = SuperJobs(broker=NatsBroker("nats://localhost:4222"))
+    await jobs.start()
+    try:
+        client = jobs.client(MANIFEST_JOB)
+        handle = await client.submit(
+            ManifestRequest(device_id="sensor-17"),
+            options=SubmitOptions(idempotency_key="request-123"),
+        )
+        result = await handle.result()
+        async for event in handle.events():
+            print(event.sequence, event.data)
+
+        again = await client.get(handle.job_id)
+        print(await again.status(), await again.outcome())
+    finally:
+        await jobs.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+`submit()` returns a reusable **client-side handle** to one execution. Its identity
+lets another runtime reconstruct a handle and observe that execution later.
+
+| API | Role |
+| --- | --- |
+| `await handle.result()` / `await handle` | Wait for the typed final result |
+| `await handle.outcome()` | Terminal success, failure, or cancellation envelope |
+| `await handle.status()` | Latest execution status snapshot |
+| `async for event in handle.events(after=...)` | System events, logs, progress, and application events (ordered where retained); cursor replay under retention |
+| `await handle.cancel()` | Cooperative cancellation request while execution is active |
+| `await client.get(job_id)` / `client.handle(job_id)` | Reconstruct a handle after reconnect or in another process |
+
+Executions are **at least once**; make external side effects idempotent. Outage and
+retry semantics are summarized in [ADR 0005](docs/adr/0005-broker-outage-retry-and-optional-stress.md).
+Cross-process contract fingerprints are **not** enforced yet ([ADR 0003](docs/adr/0003-cross-process-contract-compatibility.md)).
+
+For deterministic tests without a broker:
+
+```python
+from superjobs import InMemoryTransport, SuperJobs
+
 jobs = SuperJobs(transport=InMemoryTransport())
 ```
 
-NATS integration tests are marked with `pytest.mark.nats`. By default the harness
-starts an isolated JetStream server (pinned `nats-server` v2.15.0). Set `NATS_URL`
-to use an external broker, or `NATS_EXECUTABLE` for an offline binary path. See
-[docs/design/nats-test-harness.md](docs/design/nats-test-harness.md).
-
-## Developer checks
-
-Routine fast checks (no broker):
-
-```bash
-python -m scripts.dev_check fast
-```
-
-Full local verification (typing, NATS, installed cross-program and recovery runners):
-
-```bash
-python -m scripts.dev_check full
-```
-
-Required PR gates and the CI matrix are documented in
-[docs/design/dev-checks-verification.md](docs/design/dev-checks-verification.md).
-CI-style isolated runs (example Python **3.12**; match the matrix minor on other jobs):
-
-```bash
-uv run --isolated --no-project --python 3.12 --with-editable . --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0" python -m scripts.dev_check fast
-```
-
-```bash
-uv run pytest -m nats
-```
-
-Verify installed shared contracts between separate producer and worker processes:
-
-```bash
-uv run python tools/verify_cross_program.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue12
-```
-
-This gate always owns its broker and fails missing infrastructure. See
-[cross-program verification](docs/design/cross-program-verification.md) for scenarios,
-isolation checks, failure diagnostics and measured results.
-
-Verify worker crash recovery before and after durable completion:
-
-```bash
-uv run python tools/verify_worker_recovery.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue13
-```
-
-See [worker recovery verification](docs/design/worker-recovery-verification.md) for scenarios,
-checkpoints, and evidence retention.
-
-Verify execution and result persistence across a NATS broker restart:
-
-```bash
-uv run python tools/verify_broker_restart.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue14
-```
-
-See [broker restart verification](docs/design/broker-restart-verification.md) for the scenario,
-broker resource evidence, and failure diagnostics.
-
-Verify idle producer and worker recovery after a short NATS outage:
-
-```bash
-uv run python tools/verify_idle_outage.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue20
-```
-
-See [idle outage verification](docs/design/idle-outage-verification.md) for reconnect checkpoints,
-handle retry semantics, and failure diagnostics.
+Further API detail: [docs/api.md](docs/api.md). Checks and CI:
+[docs/development.md](docs/development.md). Measured results:
+[docs/verification.md](docs/verification.md).

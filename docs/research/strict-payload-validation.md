@@ -1,5 +1,10 @@
 # Strict payload validation before construction
 
+> **Historical status (2026-10-03):** Primary-source research for issue [#9](https://github.com/vschroeter/superjobs/issues/9)
+> (2026-09-29). Shipped behavior and supported shapes are documented in
+> [payload-validation.md](../payload-validation.md) and [ADR 0002](../adr/0002-strict-payload-validation.md).
+> This file retains measured probe tables and upstream citations.
+
 Research for [Validate payloads strictly before request construction](https://github.com/vschroeter/superjobs/issues/9), 2026-09-29. This report separates upstream facts, local measurements and implementation recommendations. It does not claim that the production implementation already satisfies the proposed checks.
 
 The measured environment is Python 3.13.5, Pydantic 2.13.4 and pydantic-core 2.46.4. Probes ran with the repository's installed dependencies through public Pydantic imports; no application class configuration was changed. The current source of pydantic-core is inside the Pydantic monorepo. The older separate `pydantic/pydantic-core` repository has different constructor behavior and must not be used to infer behavior of this installed version.

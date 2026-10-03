@@ -56,5 +56,7 @@ Fixtures: `nats_url`, `nats_broker`, `nats_broker_factory`, and
 - Real fresh-bucket startup exposed [#24](https://github.com/vschroeter/superjobs/issues/24).
   The narrow `NoKeysError` fix and three deterministic regressions are included.
 
-These checks exercise the test foundation; they do not establish the broader
-reliability/performance guarantees planned in #12–#15 and #20–#23.
+These checks exercise the test foundation and required integration gates (#10–#15,
+including idle outage #20). Optional manual repetition (#22) and performance
+baselines (#23) are documented separately in
+[docs/README.md](../README.md); they do not expand harness closure criteria.

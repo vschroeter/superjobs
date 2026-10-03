@@ -1,6 +1,8 @@
 # Optional NATS reliability repetition
 
 Implemented for [Add bounded optional repetition of NATS reliability scenarios](https://github.com/vschroeter/superjobs/issues/22).
+Combined verification with issue #23: [verification.md](../verification.md).
+Documentation index: [docs/README.md](../README.md).
 
 ## Commands
 
