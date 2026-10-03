@@ -983,6 +983,15 @@ def _pass_payload(state: PythonPassState, broker_log: str) -> dict[str, Any]:
     }
 
 
+def resolve_recovery_scenarios(
+    required_scenarios: tuple[str, ...] | None,
+    optional_scenarios: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Order scenarios for a pass: required pair by default, or an explicit subset plus optional."""
+    base = required_scenarios if required_scenarios is not None else RECOVERY_SCENARIOS
+    return (*base, *optional_scenarios)
+
+
 def verify_python_version(
     *,
     python_version: str,
@@ -990,8 +999,10 @@ def verify_python_version(
     library: Path,
     contract: Path,
     artifact_dir: Path,
+    required_scenarios: tuple[str, ...] | None = None,
     optional_scenarios: tuple[str, ...] = (),
 ) -> PythonPassState:
+    scenarios_to_run = resolve_recovery_scenarios(required_scenarios, optional_scenarios)
     tag = runtime_evidence_tag(python_version)
     state = PythonPassState(
         python_version=python_version,
@@ -1053,7 +1064,7 @@ def verify_python_version(
             ),
         }
 
-        for scenario in (*RECOVERY_SCENARIOS, *optional_scenarios):
+        for scenario in scenarios_to_run:
             # Keep the owned broker's bounded stop inside the overall scenario cap.
             scenario_deadline = time.monotonic() + SCENARIO_TIMEOUT_SECONDS - SHUTDOWN_TIMEOUT_SECONDS
             owner = OwnedNatsServer()
@@ -1138,6 +1149,18 @@ def collect_optional_scenarios(args: argparse.Namespace) -> tuple[str, ...]:
     return tuple(dict.fromkeys(selected))
 
 
+def collect_only_scenarios(args: argparse.Namespace) -> tuple[str, ...] | None:
+    selected = tuple(args.only_scenarios or ())
+    if not selected:
+        return None
+    unknown = [item for item in selected if item not in RECOVERY_SCENARIOS]
+    if unknown:
+        raise WorkerRecoveryError(
+            f"unsupported required-only scenario(s): {', '.join(unknown)}",
+        )
+    return tuple(dict.fromkeys(selected))
+
+
 def collect_python_versions(args: argparse.Namespace) -> tuple[str, ...]:
     versions: list[str] = list(args.python_versions or [])
     if not versions:
@@ -1164,13 +1187,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Retain temporary work directories after a successful run.",
     )
     parser.add_argument(
+        "--only-scenario",
+        action="append",
+        dest="only_scenarios",
+        choices=RECOVERY_SCENARIOS,
+        help=(
+            "Run only the listed required scenario(s) instead of the full required pair "
+            f"({', '.join(RECOVERY_SCENARIOS)})."
+        ),
+    )
+    parser.add_argument(
         "--scenario",
         action="append",
         dest="optional_scenarios",
         choices=OPTIONAL_RECOVERY_SCENARIOS,
         help=(
             "Optional exploratory recovery scenario(s); required scenarios "
-            f"{', '.join(RECOVERY_SCENARIOS)} always run."
+            f"{', '.join(RECOVERY_SCENARIOS)} always run unless --only-scenario is set."
         ),
     )
     parser.add_argument(
@@ -1181,6 +1214,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     python_versions = collect_python_versions(args)
     optional_scenarios = collect_optional_scenarios(args)
+    only_scenarios = collect_only_scenarios(args)
+    required_scenarios = only_scenarios
     parent = args.work_dir or Path(tempfile.gettempdir())
     assert_work_parent_outside_repo(parent)
     work_dir = Path(tempfile.mkdtemp(prefix="superjobs-worker-recovery-", dir=parent))
@@ -1203,6 +1238,7 @@ def main(argv: list[str] | None = None) -> int:
                 library=library,
                 contract=contract,
                 artifact_dir=artifact_dir,
+                required_scenarios=required_scenarios,
                 optional_scenarios=optional_scenarios,
             )
     except (WorkerRecoveryError, VerificationError, KeyboardInterrupt) as exc:
@@ -1242,7 +1278,10 @@ def main(argv: list[str] | None = None) -> int:
     print("verify_worker_recovery: OK")
     for py_version in python_versions:
         tag = runtime_evidence_tag(py_version)
-        scenarios_run = [*RECOVERY_SCENARIOS, *optional_scenarios]
+        scenarios_run = [
+            *(required_scenarios if required_scenarios is not None else RECOVERY_SCENARIOS),
+            *optional_scenarios,
+        ]
         print(f"Worker recovery {tag}: scenarios {', '.join(scenarios_run)}")
     if not owns_default_artifacts:
         print(f"Artifacts written to {artifact_dir}")
