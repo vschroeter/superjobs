@@ -68,6 +68,13 @@ from scheduling import SampleRunConfig, run_sample
 FLOW_TIMEOUT = 120.0
 READY_POLL_INTERVAL = 0.05
 TERMINAL_WAIT = 30.0
+CAPTURE_REPLAY_EVIDENCE_ENV = "SUPERJOBS_PERF_CAPTURE_REPLAY_EVIDENCE"
+REPLAY_EVIDENCE_TIMEOUT_SECONDS = 15.0
+REPLAY_EVIDENCE_MAX_EVENTS = 64
+
+
+def _capture_replay_evidence_enabled() -> bool:
+    return os.environ.get(CAPTURE_REPLAY_EVIDENCE_ENV) == "1"
 
 _KNOWN_SYSTEM_EVENT_TYPES = (
     JobStarted,
@@ -175,6 +182,159 @@ async def _validate_telemetry(handle) -> ValidationFailure | None:
     if not isinstance(outcome, JobSucceeded):
         return _validation_fail(f"telemetry outcome {outcome!r}", "validation_outcome")
     return await _validate_telemetry_after_outcome(handle)
+
+
+async def _collect_replay_evidence_inner(handle) -> dict[str, Any]:
+    evidence: dict[str, Any] = {}
+    for delay in (0.0, 0.1, 0.5):
+        if delay:
+            await asyncio.sleep(delay)
+        key = f"events_retry_after_{delay}s"
+        collected: list[dict[str, Any]] = []
+        try:
+            async for event in handle.events():
+                if len(collected) >= REPLAY_EVIDENCE_MAX_EVENTS:
+                    evidence[key] = {
+                        "ok": False,
+                        "truncated": True,
+                        "events": collected,
+                    }
+                    break
+                collected.append(
+                    {
+                        "sequence": event.sequence,
+                        "type": type(event.data).__qualname__,
+                    },
+                )
+            else:
+                evidence[key] = {"ok": True, "events": collected}
+        except Exception as exc:
+            evidence[key] = {"ok": False, **exception_fields(exc)}
+    for after in (0, 1):
+        key = f"events_after_cursor_{after}"
+        sequences: list[int] = []
+        try:
+            async for event in handle.events(after=after):
+                if len(sequences) >= REPLAY_EVIDENCE_MAX_EVENTS:
+                    evidence[key] = {
+                        "ok": False,
+                        "truncated": True,
+                        "sequences": sequences,
+                    }
+                    break
+                sequences.append(event.sequence)
+            else:
+                evidence[key] = {"ok": True, "sequences": sequences}
+        except Exception as exc:
+            evidence[key] = {"ok": False, **exception_fields(exc)}
+    return evidence
+
+
+async def _collect_replay_evidence(handle) -> dict[str, Any]:
+    try:
+        return await asyncio.wait_for(
+            _collect_replay_evidence_inner(handle),
+            timeout=REPLAY_EVIDENCE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        return {"ok": False, "detail": "replay evidence collection timed out"}
+
+
+async def _observation_consumer_at_failure(
+    jobs: SuperJobs,
+    handle,
+    *,
+    job,
+) -> dict[str, Any]:
+    from nats.js.errors import NotFoundError
+
+    from superjobs.transport.nats_backend import NatsJobBackend
+    from superjobs.transport.transport import Source
+
+    execution_id = _execution_id(handle)
+    if execution_id is None:
+        return {"available": False, "reason": "missing execution_id"}
+    transport = jobs.transport
+    if not isinstance(transport, NatsJobBackend):
+        return {"available": False, "reason": "not a NATS backend"}
+    subject = transport._observation_subject(job.identity, execution_id)
+    source = Source(
+        name=subject,
+        stream=transport.queue_config.observation_stream,
+    )
+    consumer_name = transport._transport.consumer_name(source)
+    payload: dict[str, Any] = {
+        "observation_subject": subject,
+        "observation_stream": transport.queue_config.observation_stream,
+        "expected_durable_consumer": consumer_name,
+    }
+    if consumer_name is None:
+        payload["note"] = "non-durable observation consumer; broker may not list it after close"
+        return payload
+    jetstream = transport.broker.connection.jetstream()
+    try:
+        info = await jetstream.consumer_info(
+            transport.queue_config.observation_stream,
+            consumer_name,
+        )
+    except NotFoundError:
+        payload["consumer_info"] = {"present": False}
+        payload["note"] = "durable consumer not found at failure point (may be ephemeral)"
+        return payload
+    except Exception as exc:
+        payload["consumer_info_error"] = repr(exc)
+        return payload
+    config = info.config
+    payload["consumer_info"] = {
+        "present": True,
+        "name": info.name,
+        "filter_subject": config.filter_subject,
+        "filter_subjects": list(config.filter_subjects or ()),
+        "ack_policy": str(config.ack_policy),
+        "deliver_policy": str(config.deliver_policy),
+        "num_pending": info.num_pending,
+        "num_ack_pending": info.num_ack_pending,
+    }
+    return payload
+
+
+async def _bounded_observation_consumer_at_failure(
+    jobs: SuperJobs,
+    handle,
+    *,
+    job,
+) -> dict[str, Any]:
+    try:
+        return await asyncio.wait_for(
+            _observation_consumer_at_failure(jobs, handle, job=job),
+            timeout=REPLAY_EVIDENCE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        return {"ok": False, "detail": "observation consumer probe timed out"}
+    except Exception as exc:
+        return {"ok": False, **exception_fields(exc)}
+
+
+async def _collect_validation_failure_replay_evidence(
+    jobs: SuperJobs,
+    handle,
+    *,
+    job,
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {}
+    try:
+        evidence["observation_consumer"] = await _bounded_observation_consumer_at_failure(
+            jobs,
+            handle,
+            job=job,
+        )
+    except Exception as exc:
+        evidence["observation_consumer"] = {"ok": False, **exception_fields(exc)}
+    try:
+        evidence.update(await _collect_replay_evidence(handle))
+    except Exception as exc:
+        evidence["replay_collection_error"] = exception_fields(exc)
+    return evidence
 
 
 async def _validate_manifest(handle) -> ValidationFailure | None:
@@ -315,6 +475,7 @@ async def _run_sample(
         failed_outcome: JobFailedOutcome | None = None
         track_exc: BaseException | None = None
         validation_exc: BaseException | None = None
+        replay_evidence: dict[str, Any] | None = None
         try:
             outcome = await handle.outcome(wait_timeout=terminal_wait)
             terminal_mono = measurement_now()
@@ -334,6 +495,21 @@ async def _run_sample(
                     detail = validation_failure.detail
                     phase = validation_failure.phase
                     validation_exc = validation_failure.source_exc
+                    if (
+                        phase == "validation_events"
+                        and handle is not None
+                        and _capture_replay_evidence_enabled()
+                    ):
+                        job = (
+                            PERFORMANCE_TELEMETRY_JOB
+                            if workload == "telemetry"
+                            else PERFORMANCE_MANIFEST_JOB
+                        )
+                        replay_evidence = await _collect_validation_failure_replay_evidence(
+                            jobs,
+                            handle,
+                            job=job,
+                        )
                 else:
                     bucket = classify_terminal_time(terminal_mono, boundary_mono)
         except TimeoutError:
@@ -370,28 +546,29 @@ async def _run_sample(
                 )
             else:
                 record_exc = validation_exc if bucket == "validation_error" else track_exc
-                sample_accounting.add(
-                    _completion_from_failure(
-                        handle=handle,
-                        seq=seq,
-                        submit_started=submit_started,
-                        submit_finished=submit_finished,
-                        terminal_mono=terminal_mono,
-                        bucket=bucket,
-                        phase=(
-                            phase
-                            if phase is not None
-                            else (
-                                "submit"
-                                if bucket in ("submit_failed", "submit_uncertain")
-                                else "outcome"
-                            )
-                        ),
-                        detail=detail,
-                        outcome=failed_outcome,
-                        exc=record_exc,
+                failure_record = _completion_from_failure(
+                    handle=handle,
+                    seq=seq,
+                    submit_started=submit_started,
+                    submit_finished=submit_finished,
+                    terminal_mono=terminal_mono,
+                    bucket=bucket,
+                    phase=(
+                        phase
+                        if phase is not None
+                        else (
+                            "submit"
+                            if bucket in ("submit_failed", "submit_uncertain")
+                            else "outcome"
+                        )
                     ),
+                    detail=detail,
+                    outcome=failed_outcome,
+                    exc=record_exc,
                 )
+                if bucket == "validation_error" and phase == "validation_events":
+                    failure_record.replay_evidence = replay_evidence
+                sample_accounting.add(failure_record)
 
     config = SampleRunConfig(
         inflight=inflight,

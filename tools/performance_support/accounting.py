@@ -60,6 +60,7 @@ class CompletionRecord:
     exception_type: str | None = None
     exception_repr: str | None = None
     exception_message: str | None = None
+    replay_evidence: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -183,6 +184,7 @@ class SampleAccounting:
                     "exception_type": item.exception_type,
                     "exception_repr": item.exception_repr,
                     "exception_message": item.exception_message,
+                    "replay_evidence": item.replay_evidence,
                 },
             )
         return rows

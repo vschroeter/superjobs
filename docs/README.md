@@ -35,6 +35,7 @@ Follow-up work is tracked on GitHub (for example
 | [design/reliability-repetition-verification.md](design/reliability-repetition-verification.md) | Optional #22 repetition |
 | [design/performance-baseline.md](design/performance-baseline.md) | Optional #23 harness |
 | [Manifest replay investigation (#27)](https://github.com/vschroeter/superjobs/issues/27) | Investigation outcome and retained evidence |
+| [design/manifest-replay-investigation.md](design/manifest-replay-investigation.md) | Optional replay diagnostics, commands and evidence limits |
 | [performance-baselines/](performance-baselines/README.md) | Dated JSON/MD measurement artifacts |
 | [research/contract-fingerprint-detection.md](research/contract-fingerprint-detection.md) | Cross-process fingerprint design research |
 | [research/strict-payload-validation.md](research/strict-payload-validation.md) | Pydantic strict-boundary research |
@@ -63,7 +64,7 @@ is explicit so GitHub issues need not duplicate file history.
 | `design/idle-outage-verification.md` | **Retained** | Idle outage protocol |
 | `design/reliability-repetition-verification.md` | **Retained** | Optional #22 runner detail |
 | `design/performance-baseline.md` | **Retained** | Optional #23 harness detail |
-| `design/manifest-replay-investigation.md` | **Retained untouched** | Local #27 notes |
+| `design/manifest-replay-investigation.md` | **Retained diagnostic reference** | Optional #27 runner and historical evidence; no verified runtime fix |
 | `design/dev-checks-verification.md` | **Removed** | Unique CI/JUnit/wheel-isolation rules → `development.md` |
 | `design/issues22-23-verification.md` | **Removed** | Dated counts/controls → `verification.md` |
 | `design/deterministic-test-synchronization.md` | **Removed** | Issue #25 rationale → `verification.md` |

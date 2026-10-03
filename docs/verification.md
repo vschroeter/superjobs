@@ -76,14 +76,29 @@ remains **optional/manual** and outside required PR closure.
 | Topic | State |
 | --- | --- |
 | Cross-process contract enforcement | **Not implemented** — descriptors/fingerprints/manifest ([#29](https://github.com/vschroeter/superjobs/issues/29), [#30](https://github.com/vschroeter/superjobs/issues/30)) |
-| Manifest observation replay under load | [#27](https://github.com/vschroeter/superjobs/issues/27) **closed** as not currently reproducible: no runtime fix, cause, or regression test; retain 15 historical errors (2 consumer closed, 13 expired cursor) in baseline artifacts. The issue discussion records the investigation outcome; reproduction tooling remains local and uncommitted. |
+| Manifest observation replay under load | [#27](https://github.com/vschroeter/superjobs/issues/27) **closed** as not currently reproducible: no runtime fix, cause, or regression test; retain 15 historical errors (2 consumer closed, 13 expired cursor) in baseline artifacts. The [optional diagnostic runner](design/manifest-replay-investigation.md) preserves evidence for recurrence. |
 | Performance baselines | Host-specific measurements only ([#33](https://github.com/vschroeter/superjobs/issues/33)); passing baseline does not disprove intermittent replay symptoms |
 | Branch protection / weekly schedule | Documented intent; activation tracked in [#34](https://github.com/vschroeter/superjobs/issues/34) |
 | Static typing | Pyright 1.1.414 basic target 3.12 on public fixtures — see [api.md](api.md) |
 
-Local edits to issue #27 reproduction tooling were **not** re-verified across the
-full platform matrix at the time of this documentation update; py312 fast plus six
-integration stages passed for those edits.
+The original issue #27 tooling review exercised Python 3.12 fast checks plus six
+integration stages. It did **not** run the full supported platform/version matrix.
+
+## Diagnostic tooling commit verification — 2026-10-03
+
+The retained issue #27 diagnostic tooling was independently checked on Windows,
+CPython 3.12 before committing it:
+
+- Focused replay/performance tests: **60 passed, one POSIX-only skip**, including
+  the real-NATS consumer probe.
+- `dev_check full`: **all seven stages passed**; deterministic selection:
+  **480 passed, one POSIX-only skip, 17 deselected**. Required typing, NATS,
+  installed-process and recovery stages passed.
+- Local evidence: `dist/verification/issue27-commit-review/` (gitignored).
+
+This verifies the diagnostic tooling and existing gates on that platform/interpreter.
+It does not establish a fix for the historical replay failures or a fresh full-order
+performance reproduction, and the full supported platform/version matrix was not rerun.
 
 ## What required gates do not cover
 

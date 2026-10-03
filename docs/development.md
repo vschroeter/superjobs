@@ -167,6 +167,7 @@ Contract typing and the contract-interface example:
 | --- | --- |
 | `tools/verify_reliability_repetition.py` | [design/reliability-repetition-verification.md](design/reliability-repetition-verification.md) |
 | `tools/verify_performance.py` | [design/performance-baseline.md](design/performance-baseline.md) |
+| `tools/verify_manifest_replay_repro.py` | [design/manifest-replay-investigation.md](design/manifest-replay-investigation.md) |
 
 Weekly repetition workflow: `.github/workflows/reliability-repetition.yml` on
 `api_design`; GitHub `schedule` runs only when that file exists on the default

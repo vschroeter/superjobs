@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -48,12 +49,21 @@ from tools.performance_support.protocol import (  # noqa: E402
     wait_for_ready,
     write_worker_stop,
 )
+from tools.manifest_replay_repro_support.broker_probe import (  # noqa: E402
+    attach_broker_snapshots,
+    collect_broker_snapshots,
+)
+from tools.manifest_replay_repro_support.extract import (  # noqa: E402
+    unique_execution_ids_for_replay_failures,
+)
 from tools.performance_support.reporting import (  # noqa: E402
     build_report_payload,
     finalize_run_outcome,
     write_json_report,
     write_markdown_report,
 )
+
+REPLAY_EVIDENCE_ENV = "SUPERJOBS_PERF_CAPTURE_REPLAY_EVIDENCE"
 from tools.verify_contract_typing import (  # noqa: E402
     DEFAULT_RUNTIMES,
     REPO_ROOT as TYPING_REPO_ROOT,
@@ -369,6 +379,8 @@ def _run_benchmark_pass(
         "SUPERJOBS_PERF_PROFILE": profile,
         "SUPERJOBS_PERF_WORKER_MODE": worker_mode,
     }
+    if os.environ.get(REPLAY_EVIDENCE_ENV) == "1":
+        base_env[REPLAY_EVIDENCE_ENV] = "1"
     worker_process: subprocess.Popen[str] | None = None
     producer_process: subprocess.Popen[str] | None = None
     worker_streams: tuple[TextIO, TextIO] | None = None
@@ -432,6 +444,16 @@ def _run_benchmark_pass(
             producer_exit=producer_code,
         )
         samples = list(results.get("samples") or [])
+        if os.environ.get(REPLAY_EVIDENCE_ENV) == "1":
+            execution_ids = unique_execution_ids_for_replay_failures(
+                [{"samples": samples}],
+            )
+            if execution_ids:
+                broker_payload = collect_broker_snapshots(nats_url, execution_ids)
+                samples = attach_broker_snapshots(samples, broker_payload)
+                results = dict(results)
+                results["samples"] = samples
+                results["broker_replay_evidence"] = broker_payload
         return producer_code, samples, results
     finally:
         if worker_process is not None and worker_record is not None:

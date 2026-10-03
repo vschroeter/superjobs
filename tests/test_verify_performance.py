@@ -1084,6 +1084,92 @@ def test_producer_track_manifest_events_exception_records_validation_events_phas
     asyncio.run(exercise())
 
 
+def test_producer_track_manifest_events_failure_keeps_phase_when_replay_diagnostics_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from superjobs import JobSucceeded
+
+    producer_app = _load_producer_app()
+    contracts = _producer_contracts()
+    PerformanceManifestResult = contracts.PerformanceManifestResult
+
+    monkeypatch.setenv(producer_app.CAPTURE_REPLAY_EVIDENCE_ENV, "1")
+    monkeypatch.setattr(producer_app, "REPLAY_EVIDENCE_TIMEOUT_SECONDS", 0.05)
+
+    class FakeHandle:
+        job_id = "exec-events-replay-diag"
+
+        async def outcome(self, wait_timeout: float):
+            return JobSucceeded(result=None)
+
+        async def result(self, wait_timeout: float):
+            return PerformanceManifestResult(revision="perf-baseline-rev")
+
+        def events(self):
+            async def _gen():
+                raise RuntimeError("events stream failed")
+                yield None
+
+            return _gen()
+
+    async def hanging_consumer(*_args, **_kwargs):
+        await asyncio.sleep(10)
+
+    async def exercise() -> None:
+        monkeypatch.setattr(
+            producer_app,
+            "_observation_consumer_at_failure",
+            hanging_consumer,
+        )
+        jobs = _manifest_track_fake_jobs(lambda _call: FakeHandle())
+        accounting, _seq = await producer_app._run_sample(
+            jobs,
+            workload="manifest",
+            inflight=1,
+            sample_seconds=0.15,
+            drain_seconds=0.05,
+            sequence_start=0,
+            request_bytes_seen={},
+        )
+        row = _single_validation_failure_row(accounting)
+        assert row["phase"] == "validation_events"
+        assert row.get("exception_message") == "events stream failed"
+        replay = row.get("replay_evidence") or {}
+        consumer = replay.get("observation_consumer") or {}
+        assert consumer.get("detail") == "observation consumer probe timed out"
+
+    asyncio.run(exercise())
+
+    async def raising_consumer(*_args, **_kwargs):
+        raise AttributeError("private transport seam unavailable")
+
+    async def exercise_with_raise() -> None:
+        monkeypatch.setattr(
+            producer_app,
+            "_observation_consumer_at_failure",
+            raising_consumer,
+        )
+        jobs = _manifest_track_fake_jobs(lambda _call: FakeHandle())
+        accounting, _seq = await producer_app._run_sample(
+            jobs,
+            workload="manifest",
+            inflight=1,
+            sample_seconds=0.15,
+            drain_seconds=0.05,
+            sequence_start=0,
+            request_bytes_seen={},
+        )
+        row = _single_validation_failure_row(accounting)
+        assert row["phase"] == "validation_events"
+        assert row.get("bucket") == "validation_error"
+        consumer = (row.get("replay_evidence") or {}).get("observation_consumer") or {}
+        assert consumer.get("exception_type", "").endswith("AttributeError")
+
+    asyncio.run(exercise_with_raise())
+
+
 def test_producer_track_manifest_validation_outcome_failure_records_phase() -> None:
     from superjobs import JobCompleted, JobError, JobFailedOutcome, JobStarted, JobSucceeded
 
