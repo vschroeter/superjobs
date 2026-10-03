@@ -29,7 +29,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Fast deterministic checks
         run: >
-          uv run --isolated --no-project --with-editable .
+          uv run --isolated --no-project --with-editable ".[cli]"
           --python ${{ matrix.python }}
           --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0"
           python -m scripts.dev_check fast
@@ -72,7 +72,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Integration checks
         run: >
-          uv run --isolated --no-project --with-editable .
+          uv run --isolated --no-project --with-editable ".[cli]"
           --python ${{ matrix.python }}
           --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0"
           python -m scripts.dev_check integration

@@ -8,6 +8,7 @@ Pre-alpha typed jobs over NATS JetStream. Start with the repository
 | [api.md](api.md) | Public behavior, semantics, typing limits |
 | [payload-validation.md](payload-validation.md) | Strict boundary behavior and adapter policy |
 | [development.md](development.md) | Canonical `dev_check`, CI matrix, runner index |
+| [design/cli-registration.md](design/cli-registration.md) | Optional Typer registration shell and execution limitations |
 | [verification.md](verification.md) | Dated measured results and limitations |
 | [adr/](adr/README.md) | Accepted decisions with issue links |
 

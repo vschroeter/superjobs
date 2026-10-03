@@ -25,6 +25,7 @@ PROJECT_DEPS = (
     "faststream[nats]>=0.7.4",
     "msgpack>=1.2.1",
     "pydantic>=2.13.4",
+    "typer>=0.27.2",
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -56,11 +57,14 @@ TYPING_SUITES: tuple[TypingSuite, ...] = (
     TypingSuite("producer_negative", "producer_negative", ("check_types.py",), True),
     TypingSuite("strict_payload_positive", "strict_payload_positive", ("check_types.py",), False),
     TypingSuite("strict_payload_negative", "strict_payload_negative", ("check_types.py",), True),
+    TypingSuite("cli_positive", "cli_positive", ("check_types.py", "cli_registration_example.py"), False),
+    TypingSuite("cli_negative", "cli_negative", ("check_types.py",), True),
 )
 
 RUNTIME_TEST_FILES = (
     REPO_ROOT / "tests" / "test_handler_registration.py",
     REPO_ROOT / "tests" / "test_public_api.py",
+    REPO_ROOT / "tests" / "test_cli_public.py",
 )
 
 
@@ -336,6 +340,8 @@ def copy_suite_tree(suite: TypingSuite, dest: Path) -> None:
         shutil.copy2(EXAMPLE_ROOT / "producer.py", dest / "producer.py")
     if "worker_handlers.py" in suite.include:
         shutil.copy2(EXAMPLE_ROOT / "worker_handlers.py", dest / "worker_handlers.py")
+    if suite.name == "cli_positive":
+        shutil.copy2(REPO_ROOT / "examples/cli_registration/main.py", dest / "cli_registration_example.py")
 
 
 def strip_contract_sources(pyproject: Path) -> None:
@@ -420,7 +426,7 @@ def create_wheel_venv(
             "install",
             "--python",
             str(py),
-            str(library),
+            f"{library}[cli]",
             str(contract),
             "pytest>=9.1.1",
             "pytest-asyncio>=1.4.0",
@@ -509,6 +515,7 @@ def run_runtime_tests(
     runtime_dir.mkdir(parents=True)
     for src in RUNTIME_TEST_FILES:
         shutil.copy2(src, runtime_dir / src.name)
+    shutil.copy2(REPO_ROOT / "examples/cli_registration/main.py", runtime_dir / "cli_registration_example.py")
     merged = os.environ.copy()
     merged.pop("PYTHONPATH", None)
     merged.pop("PYTHONHOME", None)

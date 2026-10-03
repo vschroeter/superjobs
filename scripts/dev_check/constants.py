@@ -36,7 +36,7 @@ UV_ISOLATED_EXAMPLE_PYTHON = "3.12"
 
 # CI / docs: isolated uv environment with worktree source and test deps (see docs/development.md).
 UV_ISOLATED_RUN_CMD = (
-    "uv run --isolated --no-project --with-editable . "
+    'uv run --isolated --no-project --with-editable ".[cli]" '
     f'--python {UV_ISOLATED_EXAMPLE_PYTHON} '
     '--with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0"'
 )

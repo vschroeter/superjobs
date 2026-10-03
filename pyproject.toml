@@ -13,6 +13,11 @@ dependencies = [
     "pydantic>=2.13.4",
 ]
 
+[project.optional-dependencies]
+cli = [
+    "typer>=0.27.2",
+]
+
 [build-system]
 requires = ["uv_build>=0.11.21,<0.12.0"]
 build-backend = "uv_build"
@@ -21,6 +26,7 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "typer>=0.27.2",
 ]
 
 [tool.pytest.ini_options]

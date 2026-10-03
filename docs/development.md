@@ -23,11 +23,11 @@ GraalPython, and prerelease builds are rejected.
 ### CI-style isolated run (example Python 3.12)
 
 ```bash
-uv run --isolated --no-project --python 3.12 --with-editable . --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0" python -m scripts.dev_check fast
+uv run --isolated --no-project --python 3.12 --with-editable ".[cli]" --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0" python -m scripts.dev_check fast
 ```
 
 ```bash
-uv run --isolated --no-project --python 3.12 --with-editable . --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0" python -m scripts.dev_check full
+uv run --isolated --no-project --python 3.12 --with-editable ".[cli]" --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0" python -m scripts.dev_check full
 ```
 
 Replace `3.12` with the matrix minor (`3.13`, `3.14`) on other jobs. Each matrix
@@ -41,7 +41,7 @@ install paths; they are not replaced by this editable orchestration layer.
 Orchestration-only regression tests (no broker):
 
 ```bash
-uv run --isolated --no-project --python 3.12 --with-editable . --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0" python -m pytest tests/test_dev_check.py -q
+uv run --isolated --no-project --python 3.12 --with-editable ".[cli]" --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0" python -m pytest tests/test_dev_check.py -q
 ```
 
 Focused iteration without broker or contract typing pytest marker:
