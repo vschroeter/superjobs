@@ -60,11 +60,12 @@ request adapter (resolving a top-level `$ref` when present). Names are normalize
 for CLI options by replacing underscores with hyphens. Collisions are rejected
 when:
 
-- two declared property names normalize to the same option name, or
+- two effective option names normalize to the same name after customization, or
 - a normalized name matches a reserved planned option (`--json`, `--input`, …).
 
 Canonical contract field names are used; aliases are not expanded into separate
-CLI options in this slice (issue #39).
+CLI options. Explicit positionals do not occupy option names. See
+[CLI input](cli-input.md) for field customization and JSON input.
 
 ### Process entry point
 
@@ -98,7 +99,16 @@ At `add()` time:
 - Request field names (normalized to hyphenated options) colliding with reserved
   options: `--json`, `--input`, `--wait`, `--wait-timeout`, `--help`
 
-Field options and JSON parsing are **not** generated in this slice (issue #39).
+Issue #39 adds mutually exclusive `--json` / `--input`, generated scalar field
+options, optional ``positional_fields`` / ``field_options`` customization, and shared
+typed request preparation before the execution-unavailable stub.
+
+Field options are all-or-nothing per command: one unsupported input schema
+property (nested, list, nullable or union) forces JSON-only input. Serialization-only
+`readOnly` properties are excluded from input generation. Enums retain their actual
+scalar values. Registration validates effective option names (including
+``field_options`` overrides) and rejects unknown configuration keys for every request
+shape.
 
 ## Execution status
 

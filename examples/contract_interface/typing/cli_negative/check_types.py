@@ -5,8 +5,14 @@ from collections.abc import Awaitable, Callable
 from superjobs import Job, JobContext
 from superjobs.cli import JobCLI
 from superjobs_contract_example import (
-    HEARTBEAT_JOB, MANIFEST_WITH_EVENTS_JOB, ManifestEvent,
-    ManifestNoEventsRequest, ManifestRequest, ManifestResult,
+    HEARTBEAT_JOB,
+    MANIFEST_NO_EVENTS_JOB,
+    MANIFEST_WITH_EVENTS_JOB,
+    ManifestEvent,
+    ManifestNoEventsRequest,
+    ManifestNoEventsResult,
+    ManifestRequest,
+    ManifestResult,
 )
 
 
@@ -74,3 +80,33 @@ def conflicting_modes(cli: JobCLI) -> None:
 
 def missing_local_handler(cli: JobCLI) -> None:
     cli.add("missing", HEARTBEAT_JOB)  # expect: reportCallIssue
+
+
+def invalid_field_options_value(cli: JobCLI) -> None:
+    async def handler(
+        request: ManifestNoEventsRequest,
+        context: JobContext[None],
+    ) -> ManifestNoEventsResult:
+        return ManifestNoEventsResult(accepted=True)
+
+    cli.add(  # expect: reportCallIssue
+        "bad-field-options",
+        MANIFEST_NO_EVENTS_JOB,
+        handler=handler,
+        field_options={"bundle_id": "not-a-cli-field"},  # expect: reportArgumentType
+    )
+
+
+def invalid_positional_fields_type(cli: JobCLI) -> None:
+    async def handler(
+        request: ManifestNoEventsRequest,
+        context: JobContext[None],
+    ) -> ManifestNoEventsResult:
+        return ManifestNoEventsResult(accepted=True)
+
+    cli.add(  # expect: reportCallIssue
+        "bad-positional",
+        MANIFEST_NO_EVENTS_JOB,
+        handler=handler,
+        positional_fields=["bundle_id"],  # expect: reportArgumentType
+    )

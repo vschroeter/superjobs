@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, assert_type
 
 from superjobs import Job, JobContext
-from superjobs.cli import JobCLI
+from superjobs.cli import CLIField, JobCLI
 from superjobs_contract_example import (
     HEARTBEAT_JOB,
     MANIFEST_NO_EVENTS_JOB,
@@ -127,6 +127,22 @@ def _lazy_sync_no_request_factory(cli: JobCLI) -> None:
         return lazy
 
     cli.add("lazy-heartbeat-sync", HEARTBEAT_JOB, handler_factory=factory)
+
+
+def _field_customization_kwargs(cli: JobCLI) -> None:
+    async def handler(
+        request: ManifestNoEventsRequest,
+        context: JobContext[None],
+    ) -> ManifestNoEventsResult:
+        return ManifestNoEventsResult(accepted=True)
+
+    cli.add(
+        "manifest-fields",
+        MANIFEST_NO_EVENTS_JOB,
+        handler=handler,
+        positional_fields=("bundle_id",),
+        field_options={"bundle_id": CLIField(help="Bundle identifier.")},
+    )
 
 
 def _typed_runtime_factories(cli: JobCLI) -> None:

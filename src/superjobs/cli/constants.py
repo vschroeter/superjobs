@@ -20,7 +20,7 @@ RESERVED_CLI_OPTION_NAMES: frozenset[str] = frozenset(
 
 UNAVAILABLE_EXECUTION_MESSAGE = (
     "CLI execution is not available in this SuperJobs release slice; "
-    "registration and help only (see docs/design/cli-registration.md)."
+    "input validation and help only (see docs/design/cli-input.md)."
 )
 
 REMOTE_ONLY_RUN_MESSAGE = (

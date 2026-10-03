@@ -4,27 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from typing import Any, Literal, ParamSpec, TypeVar, overload
 
+from superjobs.cli.command_callback import build_job_command_callback, command_help_text
 from superjobs.cli.composition import assert_mount_names_available
+from superjobs.cli.field_config import CLIField
 from superjobs.cli.constants import (
     ACTIVE_EVENT_LOOP_MESSAGE,
     EXIT_INTERRUPTED,
     EXIT_RUNTIME_FAILURE,
     EXIT_SUCCESS,
     EXIT_USAGE,
-    REMOTE_ONLY_RUN_MESSAGE,
-    UNAVAILABLE_EXECUTION_MESSAGE,
 )
 from superjobs.cli.registration import CommandRegistration
+from superjobs.cli.schema_plan import build_command_input_plan
 from superjobs.cli.validation import (
     CLIRegistrationError,
+    validate_command_input_configuration,
     validate_command_name,
     validate_local_handler,
-    validate_reserved_option_collisions,
 )
 from superjobs.jobs.handler_binding import get_marked_job
 from superjobs.jobs.job import Job, NoRequestJob, RequestJob
@@ -84,6 +85,8 @@ class JobCLI:
         handler: Callable[[JobContext[InterT]], Awaitable[FinalT]],
         handler_factory: None = None,
         remote_only: Literal[False] = False,
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
     ) -> None: ...
 
     @overload
@@ -95,6 +98,8 @@ class JobCLI:
         handler: Callable[[JobContext[InterT]], FinalT],
         handler_factory: None = None,
         remote_only: Literal[False] = False,
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
     ) -> None: ...
 
     @overload
@@ -106,6 +111,8 @@ class JobCLI:
         handler: Callable[[ReqT, JobContext[InterT]], Awaitable[FinalT]],
         handler_factory: None = None,
         remote_only: Literal[False] = False,
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
     ) -> None: ...
 
     @overload
@@ -117,6 +124,8 @@ class JobCLI:
         handler: Callable[[ReqT, JobContext[InterT]], FinalT],
         handler_factory: None = None,
         remote_only: Literal[False] = False,
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
     ) -> None: ...
 
     @overload
@@ -131,6 +140,8 @@ class JobCLI:
             Callable[[JobContext[InterT]], Awaitable[FinalT]],
         ],
         remote_only: Literal[False] = False,
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
     ) -> None: ...
 
     @overload
@@ -142,6 +153,8 @@ class JobCLI:
         handler: None = None,
         handler_factory: Callable[[], Callable[[JobContext[InterT]], FinalT]],
         remote_only: Literal[False] = False,
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
     ) -> None: ...
 
     @overload
@@ -156,6 +169,8 @@ class JobCLI:
             Callable[[ReqT, JobContext[InterT]], Awaitable[FinalT]],
         ],
         remote_only: Literal[False] = False,
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
     ) -> None: ...
 
     @overload
@@ -170,6 +185,8 @@ class JobCLI:
             Callable[[ReqT, JobContext[InterT]], FinalT],
         ],
         remote_only: Literal[False] = False,
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
     ) -> None: ...
 
     @overload
@@ -181,6 +198,8 @@ class JobCLI:
         handler: None = None,
         handler_factory: None = None,
         remote_only: Literal[True],
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
     ) -> None: ...
 
     def add(
@@ -191,6 +210,8 @@ class JobCLI:
         handler: Callable[..., Any] | None = None,
         handler_factory: Callable[[], Callable[..., Any]] | None = None,
         remote_only: bool = False,
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
     ) -> None:
         validate_command_name(command_name)
         if command_name in self._commands:
@@ -222,13 +243,24 @@ class JobCLI:
             validate_local_handler(job, handler)
         if handler_factory is not None and not callable(handler_factory):
             raise CLIRegistrationError("handler_factory must be callable")
-        validate_reserved_option_collisions(job, command_name)
+        if field_options is not None and not isinstance(field_options, Mapping):
+            raise CLIRegistrationError("field_options must be a mapping of field names to CLIField")
+        options = dict(field_options) if field_options is not None else {}
+        input_plan = validate_command_input_configuration(
+            job,
+            command_name,
+            positional_fields=positional_fields,
+            field_options=options,
+        )
         self._commands[command_name] = CommandRegistration(
             command_name=command_name,
             job=job,
             remote_only=remote_only,
             handler=handler if callable(handler) else None,
             handler_factory=handler_factory if callable(handler_factory) else None,
+            positional_fields=positional_fields,
+            field_options=options,
+            input_plan=input_plan,
         )
 
     def registrations(self) -> tuple[CommandRegistration, ...]:
@@ -238,13 +270,33 @@ class JobCLI:
         run_group = typer.Typer(help="Run a Job locally in-process.")
         submit_group = typer.Typer(help="Submit a Job for remote execution.")
         for registration in self._commands.values():
-            self._attach_command(run_group, registration, mode="run")
-            self._attach_command(submit_group, registration, mode="submit")
+            self._register_command(run_group, registration, mode="run")
+            self._register_command(submit_group, registration, mode="submit")
         return run_group, submit_group
+
+    def _register_command(
+        self,
+        group: typer.Typer,
+        registration: CommandRegistration,
+        *,
+        mode: str,
+    ) -> None:
+        plan = registration.input_plan
+        if plan is None:
+            plan = build_command_input_plan(
+                registration.job,
+                positional_fields=registration.positional_fields,
+                field_options=registration.field_options,
+            )
+        callback = build_job_command_callback(registration, plan, mode=mode)
+        group.command(
+            name=registration.command_name,
+            help=command_help_text(registration, plan, mode=mode),
+        )(callback)
 
     def build_typer(self) -> typer.Typer:
         root = typer.Typer(
-            help="SuperJobs contract commands (registration shell; execution deferred).",
+            help="SuperJobs contract commands (input validation; execution deferred).",
             no_args_is_help=True,
             pretty_exceptions_enable=False,
         )
@@ -259,27 +311,6 @@ class JobCLI:
         run_group, submit_group = self._build_run_submit_groups()
         app.add_typer(run_group, name="run")
         app.add_typer(submit_group, name="submit")
-
-    def _attach_command(
-        self,
-        group: typer.Typer,
-        registration: CommandRegistration,
-        *,
-        mode: str,
-    ) -> None:
-
-        @group.command(
-            name=registration.command_name,
-            help=f"Job {registration.job.canonical_name} ({mode}; execution unavailable).",
-        )
-        def _command() -> None:
-            if mode == "run" and registration.remote_only:
-                typer.echo(REMOTE_ONLY_RUN_MESSAGE, err=True)
-                raise typer.Exit(code=EXIT_USAGE)
-            typer.echo(UNAVAILABLE_EXECUTION_MESSAGE, err=True)
-            raise typer.Exit(code=EXIT_RUNTIME_FAILURE)
-
-        _command.__name__ = f"{mode}_{registration.command_name.replace('-', '_')}"
 
     def main(self, argv: list[str] | None = None) -> int:
         """Synchronous process entry point; owns one asyncio event loop invocation."""

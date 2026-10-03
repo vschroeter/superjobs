@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from superjobs.cli.constants import RESERVED_CLI_OPTION_NAMES
+from superjobs.cli.field_config import CLIField
+from superjobs.cli.schema_plan import CommandInputPlan, ScalarKind, build_command_input_plan
 from superjobs.jobs.handler_binding import validate_handler_job_association, validate_handler_signature
 from superjobs.jobs.job import Job
 
@@ -31,69 +34,90 @@ def validate_command_name(command_name: str) -> None:
         )
 
 
-def normalize_option_name(field_name: str) -> str:
-    return field_name.replace("_", "-")
-
-
-def _resolve_schema_node(schema: Any, root: dict[str, Any]) -> dict[str, Any] | None:
-    if not isinstance(schema, dict):
-        return None
-    ref = schema.get("$ref")
-    if isinstance(ref, str) and ref.startswith("#/"):
-        node: Any = root
-        for segment in ref.removeprefix("#/").split("/"):
-            if not isinstance(node, dict):
-                return None
-            node = node.get(segment.replace("~1", "/").replace("~0", "~"))
-        return node if isinstance(node, dict) else None
-    return schema
-
-
-def _normalized_field_sources(properties: dict[str, Any]) -> dict[str, list[str]]:
-    sources: dict[str, list[str]] = {}
-    for key in properties:
-        normalized = normalize_option_name(str(key))
-        sources.setdefault(normalized, []).append(str(key))
-    return sources
-
-
-def validate_reserved_option_collisions(job: Job[Any, Any, Any], command_name: str) -> None:
-    if job.request_type is None:
-        return
-    codec = job.request_codec
-    if codec is None:
-        return
-    raw_schema = codec.schema()
-    if not isinstance(raw_schema, dict):
-        return
-    object_schema = _resolve_schema_node(raw_schema, raw_schema)
-    if object_schema is None:
-        return
-    properties = object_schema.get("properties")
-    if not isinstance(properties, dict):
-        return
-
-    normalized_sources = _normalized_field_sources(properties)
-    duplicate_norms = sorted(
-        name for name, keys in normalized_sources.items() if len(keys) > 1
-    )
-    if duplicate_norms:
-        details = ", ".join(
-            f"{norm!r} from {normalized_sources[norm]!r}" for norm in duplicate_norms
-        )
+def _validate_option_token(option_name: str, command_name: str, field_name: str) -> None:
+    if not option_name:
         raise CLIRegistrationError(
-            f"command {command_name!r} request schema has duplicate normalized "
-            f"CLI option names: {details}",
+            f"command {command_name!r} field {field_name!r} has empty CLI option name",
+        )
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", option_name):
+        raise CLIRegistrationError(
+            f"command {command_name!r} field {field_name!r} option {option_name!r} "
+            "must use lowercase letters, digits, and hyphens",
         )
 
-    declared = frozenset(normalized_sources)
-    collisions = sorted(declared & RESERVED_CLI_OPTION_NAMES)
+
+def _validate_plan_collisions(
+    plan: CommandInputPlan,
+    command_name: str,
+) -> None:
+    if not plan.field_mode_available:
+        return
+
+    effective: dict[str, str] = {}
+    for field in plan.fields:
+        _validate_option_token(field.option_name, command_name, field.canonical_name)
+        if field.is_positional:
+            continue
+        if field.option_name in effective and effective[field.option_name] != field.canonical_name:
+            raise CLIRegistrationError(
+                f"command {command_name!r} request fields {effective[field.option_name]!r} and "
+                f"{field.canonical_name!r} have duplicate normalized CLI option --{field.option_name}",
+            )
+        effective[field.option_name] = field.canonical_name
+
+    positive_names = set(effective)
+    collisions = sorted(positive_names & RESERVED_CLI_OPTION_NAMES)
     if collisions:
         joined = ", ".join(f"--{name}" for name in collisions)
         raise CLIRegistrationError(
             f"command {command_name!r} request fields collide with reserved CLI options: "
             f"{joined}",
         )
+
+    for field in plan.fields:
+        if field.is_positional or field.kind is not ScalarKind.BOOLEAN:
+            continue
+        negative = f"no-{field.option_name}"
+        if negative in positive_names:
+            raise CLIRegistrationError(
+                f"command {command_name!r} boolean negative name --{negative} "
+                f"collides with field option --{negative}",
+            )
+
+
+def validate_command_input_configuration(
+    job: Job[Any, Any, Any],
+    command_name: str,
+    *,
+    positional_fields: tuple[str, ...],
+    field_options: Mapping[str, CLIField],
+) -> CommandInputPlan:
+    if not isinstance(positional_fields, tuple):
+        raise CLIRegistrationError("positional_fields must be a tuple of field names")
+    if field_options is not None and not isinstance(field_options, Mapping):
+        raise CLIRegistrationError("field_options must be a mapping of field names to CLIField")
+
+    if not all(isinstance(name, str) for name in positional_fields):
+        raise CLIRegistrationError("positional_fields must contain field names as strings")
+    for name, config in field_options.items():
+        if not isinstance(name, str) or not isinstance(config, CLIField):
+            raise CLIRegistrationError("field_options must map string field names to CLIField")
+        if config.option is not None and not isinstance(config.option, str):
+            raise CLIRegistrationError("CLIField.option must be a string")
+        if config.help is not None and not isinstance(config.help, str):
+            raise CLIRegistrationError("CLIField.help must be a string")
+
+    try:
+        plan = build_command_input_plan(
+            job,
+            positional_fields=positional_fields,
+            field_options=field_options,
+        )
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise CLIRegistrationError(str(exc)) from exc
+
+    _validate_plan_collisions(plan, command_name)
+    return plan
 
 
 def validate_local_handler(job: Job[Any, Any, Any], handler: Any) -> None:

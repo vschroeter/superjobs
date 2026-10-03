@@ -304,7 +304,7 @@ def test_run_local_reports_unavailable() -> None:
 
     cli.add("echo", job, handler=handler)
     runner = CliRunner()
-    result = runner.invoke(cli.build_typer(), ["run", "echo"])
+    result = runner.invoke(cli.build_typer(), ["run", "echo", "--value", "1"])
     assert result.exit_code == EXIT_RUNTIME_FAILURE
     assert UNAVAILABLE_EXECUTION_MESSAGE in result.stderr
     assert result.stdout == ""
@@ -315,7 +315,7 @@ def test_submit_reports_unavailable() -> None:
     cli = JobCLI()
     cli.add("echo", job, remote_only=True)
     runner = CliRunner()
-    result = runner.invoke(cli.build_typer(), ["submit", "echo"])
+    result = runner.invoke(cli.build_typer(), ["submit", "echo", "--value", "1"])
     assert result.exit_code == EXIT_RUNTIME_FAILURE
     assert UNAVAILABLE_EXECUTION_MESSAGE in result.stderr
 
@@ -399,7 +399,7 @@ def test_sync_handler_registration() -> None:
 
     cli.add("echo", job, handler=sync_handler)
     runner = CliRunner()
-    result = runner.invoke(cli.build_typer(), ["run", "echo"])
+    result = runner.invoke(cli.build_typer(), ["run", "echo", "--value", "1"])
     assert result.exit_code == EXIT_RUNTIME_FAILURE
 
 
@@ -455,9 +455,9 @@ def test_unavailable_modes_do_not_initialize_dependencies(capsys: pytest.Capture
 
 
 @pytest.mark.parametrize("argv, expected", [
-    (["run", "greet"], EXIT_RUNTIME_FAILURE),
-    (["submit", "greet-remote"], EXIT_RUNTIME_FAILURE),
-    (["run", "greet-remote"], EXIT_USAGE),
+    (["run", "greet", "world"], EXIT_RUNTIME_FAILURE),
+    (["submit", "greet-remote", "--json", '{"name":"world"}'], EXIT_RUNTIME_FAILURE),
+    (["run", "greet-remote", "--json", '{"name":"world"}'], EXIT_USAGE),
     (["missing"], EXIT_USAGE),
     (["submit", "greet-remote", "--bad"], EXIT_USAGE),
     (["--help"], EXIT_SUCCESS),
