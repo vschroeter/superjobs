@@ -31,6 +31,19 @@ OutcomeBucket = Literal[
     "submit_uncertain",
 ]
 
+FailurePhase = Literal[
+    "submit",
+    "outcome",
+    "validation_result",
+    "validation_events",
+    "validation_outcome",
+    "cleanup",
+]
+
+_SUCCESS_BUCKETS: frozenset[OutcomeBucket] = frozenset(
+    ("success_in_window", "success_late_drain"),
+)
+
 
 @dataclass(slots=True)
 class CompletionRecord:
@@ -40,6 +53,13 @@ class CompletionRecord:
     terminal_mono: float | None
     bucket: OutcomeBucket
     detail: str | None = None
+    phase: FailurePhase | None = None
+    execution_id: str | None = None
+    job_error_code: str | None = None
+    job_error_message: str | None = None
+    exception_type: str | None = None
+    exception_repr: str | None = None
+    exception_message: str | None = None
 
 
 @dataclass(slots=True)
@@ -146,11 +166,33 @@ class SampleAccounting:
             values.append(item.terminal_mono - item.submit_started_mono)
         return values
 
+    def failure_diagnostics(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in self.completions:
+            if item.bucket in _SUCCESS_BUCKETS:
+                continue
+            rows.append(
+                {
+                    "sequence": item.sequence,
+                    "execution_id": item.execution_id,
+                    "phase": item.phase or _default_failure_phase(item.bucket),
+                    "bucket": item.bucket,
+                    "detail": item.detail,
+                    "job_error_code": item.job_error_code,
+                    "job_error_message": item.job_error_message,
+                    "exception_type": item.exception_type,
+                    "exception_repr": item.exception_repr,
+                    "exception_message": item.exception_message,
+                },
+            )
+        return rows
+
     def summarize(self) -> dict[str, Any]:
         counts = self.counts()
         successful_scope = (
             "successful_completions_including_late_drain_for_latency_only"
         )
+        failure_rows = self.failure_diagnostics()
         return {
             "window_seconds": self.window.elapsed_seconds,
             "submission_boundary_seconds": self.window.intended_submission_window_seconds,
@@ -171,7 +213,26 @@ class SampleAccounting:
                 "scope": successful_scope,
                 **percentile_summary(self.submit_to_terminal_latencies_seconds()),
             },
+            "failure_diagnostics": failure_rows,
         }
+
+
+def _default_failure_phase(bucket: OutcomeBucket) -> FailurePhase:
+    if bucket in ("submit_failed", "submit_uncertain"):
+        return "submit"
+    return "outcome"
+
+
+def exception_fields(exc: BaseException) -> dict[str, str | None]:
+    exc_type = type(exc)
+    qualified = f"{exc_type.__module__}.{exc_type.__qualname__}"
+    message = str(exc)
+    return {
+        "exception_type": qualified,
+        "exception_repr": repr(exc),
+        "exception_message": message,
+        "detail": message,
+    }
 
 
 def classify_terminal_time(

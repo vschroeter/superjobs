@@ -170,6 +170,30 @@ _DEPENDENCY_PROBE_PACKAGES = (
     "pydantic",
 )
 
+_MEASUREMENT_CLOCK_PROBE_SCRIPT = """
+import json
+import time
+
+def record(function: str) -> dict:
+    info = time.get_clock_info(function)
+    return {
+        "function": function,
+        "implementation": info.implementation,
+        "resolution": info.resolution,
+        "monotonic": info.monotonic,
+        "adjustable": info.adjustable,
+    }
+
+print(
+    json.dumps(
+        {
+            "measurement_clock": record("perf_counter"),
+            "legacy_monotonic_clock": record("monotonic"),
+        },
+    ),
+)
+"""
+
 _DEPENDENCY_PROBE_SCRIPT = """
 import importlib.metadata as metadata
 import json
@@ -186,6 +210,43 @@ print(json.dumps(payload))
 """.format(
     packages=list(_DEPENDENCY_PROBE_PACKAGES),
 )
+
+
+def probe_measurement_clocks(python: Path) -> dict[str, Any]:
+    command = [
+        str(python),
+        "-c",
+        _MEASUREMENT_CLOCK_PROBE_SCRIPT,
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0,
+        )
+    except OSError as exc:
+        return {
+            "measurement_clock": {"function": "perf_counter", "probe_error": str(exc)},
+        }
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        return {
+            "measurement_clock": {
+                "function": "perf_counter",
+                "probe_error": f"exit {completed.returncode}: {detail}",
+            },
+        }
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return {
+            "measurement_clock": {
+                "function": "perf_counter",
+                "probe_error": "invalid json from probe",
+            },
+        }
 
 
 def probe_role_dependency_versions(python: Path) -> dict[str, str]:
@@ -273,6 +334,9 @@ def environment_block(
     storage_medium, storage_evidence = broker_storage_for_path(store_path, hardware)
     revision = git_revision(repo_root)
     clean = git_clean(repo_root)
+    clock_probe: dict[str, Any] = {}
+    if producer_python is not None:
+        clock_probe = probe_measurement_clocks(producer_python)
     return {
         "revision": revision,
         "revision_clean": clean,
@@ -292,6 +356,8 @@ def environment_block(
             producer_python=producer_python,
             worker_python=worker_python,
         ),
+        "measurement_clock": clock_probe.get("measurement_clock"),
+        "legacy_monotonic_clock": clock_probe.get("legacy_monotonic_clock"),
         "dependencies_note": (
             "child_runtime versions come from isolated importlib.metadata probes "
             "in each role venv"

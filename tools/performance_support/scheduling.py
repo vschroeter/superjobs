@@ -9,20 +9,21 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 try:
-    from accounting import CompletionRecord, SampleAccounting, SampleWindow
+    from accounting import CompletionRecord, SampleAccounting, SampleWindow, exception_fields
 except ModuleNotFoundError:
     from tools.performance_support.accounting import (
         CompletionRecord,
         SampleAccounting,
         SampleWindow,
+        exception_fields,
     )
 
 TrackFn = Callable[..., Awaitable[None]]
 SubmitFn = Callable[[int], Awaitable[Any]]
 
 
-class _Clock(Protocol):
-    def monotonic(self) -> float: ...
+class _MeasurementClock(Protocol):
+    def perf_counter(self) -> float: ...
 
 
 @dataclass(slots=True)
@@ -39,11 +40,11 @@ async def acquire_slot_before(
     sem: asyncio.Semaphore,
     deadline_mono: float,
     *,
-    clock: _Clock | None = None,
+    clock: _MeasurementClock | None = None,
 ) -> bool:
-    mono = (clock or time).monotonic
+    tick = (clock or time).perf_counter
     while True:
-        now = mono()
+        now = tick()
         if now >= deadline_mono:
             return False
         remaining = deadline_mono - now
@@ -75,12 +76,12 @@ async def run_sample(
     *,
     config: SampleRunConfig,
     submission_boundary_mono: float | None = None,
-    clock: _Clock | None = None,
+    clock: _MeasurementClock | None = None,
     accounting: SampleAccounting | None = None,
 ) -> tuple[SampleAccounting, int]:
     """Run one sample window with deadline-bounded acquire/submit and bounded drain."""
-    mono = (clock or time).monotonic
-    window_start = mono()
+    tick = (clock or time).perf_counter
+    window_start = tick()
     fixed_boundary = (
         submission_boundary_mono
         if submission_boundary_mono is not None
@@ -111,13 +112,13 @@ async def run_sample(
         max(1.0, config.drain_seconds + 1.0),
     )
 
-    while mono() < fixed_boundary:
+    while tick() < fixed_boundary:
         if not await acquire_slot_before(sem, fixed_boundary, clock=clock):
             break
-        if mono() >= fixed_boundary:
+        if tick() >= fixed_boundary:
             sem.release()
             break
-        submit_started = mono()
+        submit_started = tick()
         accept_timeout = _submit_accept_timeout(
             now_mono=submit_started,
             fixed_boundary=fixed_boundary,
@@ -136,7 +137,7 @@ async def run_sample(
                 submit_fn(seq),
                 timeout=accept_timeout,
             )
-            submit_finished = mono()
+            submit_finished = tick()
         except TimeoutError:
             submit_error = "submit accept timed out"
             sem.release()
@@ -147,12 +148,13 @@ async def run_sample(
                     submit_finished_mono=submit_finished,
                     terminal_mono=None,
                     bucket="submit_uncertain",
+                    phase="submit",
                     detail=submit_error,
                 ),
             )
             continue
         except Exception as exc:
-            submit_error = str(exc)
+            fields = exception_fields(exc)
             sem.release()
             accounting.add(
                 CompletionRecord(
@@ -161,12 +163,16 @@ async def run_sample(
                     submit_finished_mono=submit_finished,
                     terminal_mono=None,
                     bucket="submit_failed",
-                    detail=submit_error,
+                    phase="submit",
+                    detail=fields["detail"],
+                    exception_type=fields["exception_type"],
+                    exception_repr=fields["exception_repr"],
+                    exception_message=fields["exception_message"],
                 ),
             )
             continue
 
-        if mono() >= fixed_boundary:
+        if tick() >= fixed_boundary:
             sem.release()
             if handle is not None:
                 task = asyncio.create_task(
@@ -200,20 +206,20 @@ async def run_sample(
         pending.add(task)
         task.add_done_callback(pending.discard)
 
-    loop_stop_mono = mono()
-    while mono() < fixed_boundary:
+    loop_stop_mono = tick()
+    while tick() < fixed_boundary:
         if pending:
             await asyncio.wait(
                 pending,
-                timeout=min(0.05, max(0.0, fixed_boundary - mono())),
+                timeout=min(0.05, max(0.0, fixed_boundary - tick())),
             )
         else:
-            remaining = fixed_boundary - mono()
+            remaining = fixed_boundary - tick()
             if remaining <= 0:
                 break
             await asyncio.sleep(min(0.05, remaining))
 
-    boundary_reached_mono = mono()
+    boundary_reached_mono = tick()
     drain_start_mono = boundary_reached_mono
     accounting.window = SampleWindow(
         submission_start_mono=window_start,
@@ -224,10 +230,10 @@ async def run_sample(
         drain_start_mono=drain_start_mono,
     )
 
-    while pending and mono() < lifecycle_end:
+    while pending and tick() < lifecycle_end:
         await asyncio.wait(
             pending,
-            timeout=min(0.1, max(0.0, lifecycle_end - mono())),
+            timeout=min(0.1, max(0.0, lifecycle_end - tick())),
         )
 
     for task in list(pending):
@@ -236,7 +242,7 @@ async def run_sample(
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
 
-    drain_end_mono = mono()
+    drain_end_mono = tick()
     accounting.window = SampleWindow(
         submission_start_mono=window_start,
         submission_end_mono=fixed_boundary,

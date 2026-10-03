@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+MANIFEST_RELIABILITY_ISSUE_URL = "https://github.com/vschroeter/superjobs/issues/27"
+
 from tools.performance_support.accounting import throughput_variation
 from tools.performance_support.fixtures import measure_fixture_sizes
 from tools.performance_support.metadata import environment_block
@@ -29,6 +31,18 @@ def _broker_volume_key(store_path: str | None) -> str | None:
     return drive or "no-drive"
 
 
+def measurement_clock_comparison_key(clock: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not clock:
+        return None
+    return {
+        "function": clock.get("function"),
+        "implementation": clock.get("implementation"),
+        "resolution": clock.get("resolution"),
+        "monotonic": clock.get("monotonic"),
+        "adjustable": clock.get("adjustable"),
+    }
+
+
 def normalized_comparison_environment(env: dict[str, Any]) -> dict[str, Any]:
     """Stable environment slice for baseline comparison (ignores ephemeral store paths)."""
     hardware = env.get("hardware") or {}
@@ -41,7 +55,67 @@ def normalized_comparison_environment(env: dict[str, Any]) -> dict[str, Any]:
         "nats_server_version": env.get("nats_server_version"),
         "fixture_request_bytes": env.get("fixture_request_bytes"),
         "child_runtime": env.get("child_runtime"),
+        "measurement_clock": measurement_clock_comparison_key(
+            env.get("measurement_clock"),
+        ),
     }
+
+
+def observed_request_byte_ranges(
+    combinations: list[dict[str, Any]],
+) -> dict[str, dict[str, int | None]]:
+    """Min/max observed request sizes per workload from combination metadata."""
+    ranges: dict[str, dict[str, int | None]] = {}
+    for combo in combinations:
+        workload = combo.get("workload")
+        if not workload:
+            continue
+        observed = combo.get("observed_request_bytes") or {}
+        if not isinstance(observed, dict):
+            continue
+        slot = ranges.setdefault(
+            str(workload),
+            {"min": None, "max": None},
+        )
+        for key in ("min", "max"):
+            value = observed.get(key)
+            if value is None:
+                continue
+            current = slot[key]
+            if current is None:
+                slot[key] = int(value)
+            elif key == "min":
+                slot[key] = min(current, int(value))
+            else:
+                slot[key] = max(current, int(value))
+    return ranges
+
+
+def count_failure_diagnostics(combinations: list[dict[str, Any]]) -> int:
+    total = 0
+    for combo in combinations:
+        for sample in combo.get("samples") or []:
+            total += len(sample.get("failure_diagnostics") or [])
+    return total
+
+
+def finalize_run_outcome(
+    payload: dict[str, Any],
+    *,
+    run_success: bool,
+    harness_exit_code: int,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """Attach explicit harness outcome fields for every profile report."""
+    enriched = dict(payload)
+    enriched["run_success"] = run_success
+    enriched["harness_exit_code"] = harness_exit_code
+    if error:
+        enriched["error"] = error
+    if not run_success and payload.get("profile") == "baseline":
+        enriched["run_outcome"] = "failed"
+        enriched["follow_up_issues"] = [MANIFEST_RELIABILITY_ISSUE_URL]
+    return enriched
 
 
 def combination_comparison_key(item: dict[str, Any]) -> tuple[Any, ...]:
@@ -110,6 +184,11 @@ def build_report_payload(
             "Producer in-flight limiting uses an explicit asyncio semaphore; SuperJobs does not expose a submit concurrency knob.",
             "No-result telemetry jobs: awaiting outcome() is sufficient for success; calling result() is optional and raises on failure.",
             "Manifest throughput validation replays events() to assert three ordered application events plus system terminals.",
+            (
+                "Producer sample timestamps use time.perf_counter (high resolution, monotonic). "
+                "Field names ending in _mono denote a monotonic domain, not time.monotonic(). "
+                "Harness readiness and child lifecycle deadlines use time.monotonic(); never subtract across processes or clock domains."
+            ),
         ],
     }
 
@@ -122,9 +201,49 @@ def write_json_report(path: Path, payload: dict[str, Any]) -> None:
 def write_markdown_report(path: Path, payload: dict[str, Any]) -> None:
     env = payload["environment"]
     hardware = env.get("hardware") or {}
-    lines = [
-        f"# SuperJobs performance baseline ({payload.get('date') or 'undated'})",
-        "",
+    run_success = payload.get("run_success")
+    is_failed_baseline = (
+        payload.get("profile") == "baseline"
+        and run_success is False
+        and payload.get("baseline_eligible") is False
+    )
+    title_date = payload.get("date") or "undated"
+    if is_failed_baseline:
+        title = (
+            f"# SuperJobs performance baseline attempt (failed, ineligible) — {title_date}"
+        )
+    else:
+        title = f"# SuperJobs performance baseline ({title_date})"
+    lines = [title, ""]
+    if is_failed_baseline:
+        harness_code = payload.get("harness_exit_code")
+        err = payload.get("error") or "benchmark outcome validation failed"
+        diag_rows = count_failure_diagnostics(payload.get("combinations") or [])
+        ranges = observed_request_byte_ranges(payload.get("combinations") or [])
+        range_bits: list[str] = []
+        for workload in ("telemetry", "manifest"):
+            slot = ranges.get(workload) or {}
+            if slot.get("min") is not None and slot.get("max") is not None:
+                range_bits.append(f"{workload} {slot['min']}–{slot['max']} bytes")
+        range_text = "; ".join(range_bits) if range_bits else "unavailable"
+        lines.extend(
+            [
+                (
+                    f"This attempt failed (harness exit {harness_code}): {err}. "
+                    "Retained measurements are ineligible for dated success baselines. "
+                    f"Follow-up: [{MANIFEST_RELIABILITY_ISSUE_URL}]({MANIFEST_RELIABILITY_ISSUE_URL})."
+                ),
+                (
+                    f"Measured revision `{env.get('revision', 'unknown')}` "
+                    f"(clean: {env.get('revision_clean')}). "
+                    f"Typed failure_diagnostics rows in report: {diag_rows}. "
+                    f"Observed request byte ranges: {range_text}."
+                ),
+                "",
+            ],
+        )
+    lines.extend(
+        [
         f"- Profile: **{payload['profile']}** "
         f"(baseline eligible: {payload['baseline_eligible']})",
         f"- Revision: `{env['revision']}` (clean: {env.get('revision_clean')})",
@@ -135,10 +254,28 @@ def write_markdown_report(path: Path, payload: dict[str, Any]) -> None:
         f"- CPU: {hardware.get('cpu_model', 'unknown')}",
         f"- Telemetry request bytes: {env['fixture_request_bytes']['telemetry']}",
         f"- Manifest request bytes: {env['fixture_request_bytes']['manifest']}",
-        "",
-        "## Combinations",
-        "",
-    ]
+        ],
+    )
+    if run_success is not None:
+        lines.append(
+            f"- Harness: run_success={run_success}, harness_exit_code={payload.get('harness_exit_code')}",
+        )
+    measurement_clock = env.get("measurement_clock") or {}
+    if measurement_clock:
+        lines.extend(
+            [
+                f"- Measurement clock: `{measurement_clock.get('function', 'unknown')}` "
+                f"({measurement_clock.get('implementation', 'unknown')}, "
+                f"resolution={measurement_clock.get('resolution')})",
+            ],
+        )
+    lines.extend(
+        [
+            "",
+            "## Combinations",
+            "",
+        ],
+    )
     for item in payload["combinations"]:
         lines.append(
             f"### {item['workload']} @ concurrency {item['concurrency']} "
@@ -171,10 +308,25 @@ def write_markdown_report(path: Path, payload: dict[str, Any]) -> None:
                     f"median={submit_lat['median']:.4f}s p95={submit_lat['p95']:.4f}s",
                 )
             if e2e.get("median") is not None:
+                scope = e2e.get("scope")
+                scope_note = f" [{scope}]" if scope else ""
                 lines.append(
-                    f"  - End-to-end (successful completions, n={e2e.get('n')}): "
+                    f"  - End-to-end (successful completions, n={e2e.get('n')}){scope_note}: "
                     f"median={e2e['median']:.4f}s p95={e2e['p95']:.4f}s",
                 )
+            for row in sample.get("failure_diagnostics") or []:
+                lines.append(
+                    "  - failure_diagnostic: "
+                    f"sequence={row.get('sequence')} execution_id={row.get('execution_id')} "
+                    f"phase={row.get('phase')} bucket={row.get('bucket')} "
+                    f"job_error_code={row.get('job_error_code')} "
+                    f"job_error_message={row.get('job_error_message')} "
+                    f"exception_type={row.get('exception_type')} "
+                    f"exception_message={row.get('exception_message')}",
+                )
+        combo_error = item.get("error")
+        if combo_error:
+            lines.append(f"- Combination error: {combo_error}")
         lines.append("")
     if payload.get("controls"):
         lines.extend(["## Control smokes", ""])

@@ -8,7 +8,7 @@ from typing import Literal
 
 WorkloadName = Literal["telemetry", "manifest"]
 WorkerMode = Literal["success", "failure", "delay", "incomplete"]
-RunProfile = Literal["baseline", "smoke"]
+RunProfile = Literal["baseline", "smoke", "diagnostic"]
 
 EXIT_OK = 0
 EXIT_ASSERTION = 3
@@ -58,6 +58,15 @@ def profile_for(name: RunProfile) -> TimingProfile:
             drain_seconds=SMOKE_DRAIN_SECONDS,
             baseline_eligible=False,
         )
+    if name == "diagnostic":
+        return TimingProfile(
+            name="diagnostic",
+            warmup_seconds=BASELINE_WARMUP_SECONDS,
+            sample_seconds=BASELINE_SAMPLE_SECONDS,
+            sample_count=BASELINE_SAMPLE_COUNT,
+            drain_seconds=BASELINE_DRAIN_SECONDS,
+            baseline_eligible=False,
+        )
     return TimingProfile(
         name="baseline",
         warmup_seconds=BASELINE_WARMUP_SECONDS,
@@ -83,13 +92,18 @@ def _parse_int(name: str, default: int) -> int:
 
 
 def timing_from_env() -> TimingProfile:
-    profile = os.environ.get("SUPERJOBS_PERF_PROFILE", "baseline")
-    base = profile_for("smoke" if profile == "smoke" else "baseline")
+    profile_raw = os.environ.get("SUPERJOBS_PERF_PROFILE", "baseline")
+    if profile_raw == "diagnostic":
+        base = profile_for("diagnostic")
+    elif profile_raw == "smoke":
+        base = profile_for("smoke")
+    else:
+        base = profile_for("baseline")
     warmup = _parse_float("SUPERJOBS_PERF_WARMUP_SECONDS", base.warmup_seconds)
     sample_seconds = _parse_float("SUPERJOBS_PERF_SAMPLE_SECONDS", base.sample_seconds)
     sample_count = _parse_int("SUPERJOBS_PERF_SAMPLE_COUNT", base.sample_count)
     drain_seconds = _parse_float("SUPERJOBS_PERF_DRAIN_SECONDS", base.drain_seconds)
-    eligible = base.baseline_eligible and profile != "smoke"
+    eligible = base.baseline_eligible and profile_raw not in ("smoke", "diagnostic")
     if eligible:
         eligible = (
             warmup == BASELINE_WARMUP_SECONDS

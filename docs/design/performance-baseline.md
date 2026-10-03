@@ -29,8 +29,16 @@ For each profile the producer stops new submissions at the sample boundary, then
 ## Metrics and accounting
 
 - **Throughput**: count of successful, validated terminal completions before the fixed sample boundary, divided by that same fixed observation interval (`throughput_interval_seconds`, 20 seconds for a baseline). The producer observes the entire interval even when it stops admitting submissions up to 50 ms early to leave time for publish acceptance. Actual boundary wake-up (`window_seconds`), submission loop stop, and drain elapsed are reported separately. Late completions, failures, validation errors, and incomplete drain do not enter the numerator.
-- **Submit latency**: producer monotonic time from submit start to submit return (`median` / `p95` when at least 20 samples exist).
-- **Submit-to-terminal latency**: monotonic time from submit start to validated terminal (`median` / `p95` with the same minimum N).
+- **Submit latency**: producer `time.perf_counter()` from submit start to submit return (`median` / `p95` when at least 20 samples exist). JSON field names ending in `_mono` mean a monotonic clock domain, not `time.monotonic()`.
+- **Submit-to-terminal latency**: same clock from submit start to validated terminal (`median` / `p95` with the same minimum N).
+
+### Measurement clock (Windows / Python 3.12)
+
+Producer samples and scheduling deadlines use `time.perf_counter()` (typically `QueryPerformanceCounter()`, sub-microsecond resolution). Harness readiness, child reap deadlines, and cross-process protocol polling stay on `time.monotonic()` (on Windows 3.12 often `GetTickCount64()` at **15.625 ms** resolution). Never subtract timestamps across processes or across these domains.
+
+Reports record `measurement_clock` metadata from the installed producer child (`time.get_clock_info('perf_counter')`). Baseline comparison refuses throughput ratios when `measurement_clock` identity differs (for example legacy `monotonic` / `GetTickCount64()` artifacts vs corrected `perf_counter` runs).
+
+The 2026-10-03 failed baseline at revision `af5fcec` used `time.monotonic()` for samples; six telemetry/manifest submit-latency medians read **0.0** because of quantization, not because submit was free. That artifact is preserved with retrospective `GetTickCount64()` metadata in `docs/performance-baselines/2026-10-03-failed-baseline.{json,md}` (do not overwrite when re-running the harness; use `--baseline-dir` for new attempts). A green diagnostic run does not repair manifest reliability failures; unresolved failure rows remain evidence until an exact cause is captured in `failure_diagnostics`. Intermittent manifest observation replay failures under accumulated NATS workload are tracked in [issue #27](https://github.com/vschroeter/superjobs/issues/27); automatic failed-baseline reports link that issue and retain typed `failure_diagnostics` when present.
 
 End-to-end timings include application, serialization, broker, and storage costs; they are not labeled as pure queue wait.
 
@@ -77,7 +85,7 @@ uv run --no-project --python 3.12 --with . --with pytest python -m pytest tests/
 ## Artifacts
 
 - Dated baseline JSON/Markdown: `docs/performance-baselines/YYYY-MM-DD-baseline.{json,md}` (baseline profile only).
-- Raw child logs and harness evidence: under `--artifact-dir` (default temporary) or `dist/` when requested; not committed.
+- Raw child logs and harness evidence: each explicit `--artifact-dir` gets a fresh `run-<token>` child directory, preserving prior invocations and preventing stale recovery after setup failures. Default evidence is temporary; raw logs are not committed.
 - Environment block includes git revision and cleanliness, child-runtime origins (not harness packages), owned broker JetStream store path, optional `--report-date`, and hardware/storage evidence from read-only PowerShell inspection when available (`unknown` otherwise).
 
 ## API friction (first slice)

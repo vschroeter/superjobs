@@ -50,6 +50,7 @@ from tools.performance_support.protocol import (  # noqa: E402
 )
 from tools.performance_support.reporting import (  # noqa: E402
     build_report_payload,
+    finalize_run_outcome,
     write_json_report,
     write_markdown_report,
 )
@@ -93,6 +94,7 @@ ROLE_SHARED_FILES = (
     "fixtures.py",
     "accounting.py",
     "scheduling.py",
+    "measurement_clock.py",
     "config.py",
     "runtime_isolation.py",
 )
@@ -141,6 +143,7 @@ def _validate_producer_results(
     profile: str,
     workload: str,
     concurrency: int,
+    producer_exit: int = EXIT_OK,
 ) -> None:
     if results.get("workload") != workload:
         raise PerformanceError(
@@ -159,8 +162,9 @@ def _validate_producer_results(
         )
     effective = results.get("effective_timing") or {}
     samples = list(results.get("samples") or [])
+    benchmark_succeeded = producer_exit == EXIT_OK
     if profile == "baseline":
-        if not results.get("baseline_eligible"):
+        if benchmark_succeeded and not results.get("baseline_eligible"):
             raise PerformanceError("producer marked baseline run non-eligible")
         if float(effective.get("sample_seconds", -1)) != BASELINE_SAMPLE_SECONDS:
             raise PerformanceError("producer sample_seconds != baseline configuration")
@@ -179,10 +183,30 @@ def _validate_producer_results(
             raise PerformanceError(
                 f"expected {SMOKE_SAMPLE_COUNT} smoke samples, got {len(samples)}",
             )
+    elif profile == "diagnostic":
+        if results.get("baseline_eligible"):
+            raise PerformanceError("diagnostic producer must not be baseline eligible")
+        if float(effective.get("sample_seconds", -1)) != BASELINE_SAMPLE_SECONDS:
+            raise PerformanceError("diagnostic sample_seconds != baseline configuration")
+        if int(effective.get("sample_count", -1)) != BASELINE_SAMPLE_COUNT:
+            raise PerformanceError("diagnostic sample_count != baseline configuration")
+        if len(samples) != BASELINE_SAMPLE_COUNT:
+            raise PerformanceError(
+                f"expected {BASELINE_SAMPLE_COUNT} diagnostic samples, got {len(samples)}",
+            )
+    clock = results.get("measurement_clock") or {}
+    if clock.get("function") != "perf_counter":
+        raise PerformanceError(
+            f"producer measurement_clock must use perf_counter, got {clock!r}",
+        )
     for index, sample in enumerate(samples, start=1):
         if _sample_measurable_work(sample) <= 0:
             raise PerformanceError(f"sample {index} recorded no measurable work")
-        if profile == "baseline" and float(sample.get("throughput_per_second") or 0.0) <= 0.0:
+        if (
+            benchmark_succeeded
+            and profile == "baseline"
+            and float(sample.get("throughput_per_second") or 0.0) <= 0.0
+        ):
             raise PerformanceError(f"sample {index} has zero in-window throughput")
 
 
@@ -195,6 +219,8 @@ class CombinationRecord:
     samples: list[dict[str, Any]]
     baseline_eligible: bool | None = None
     effective_timing: dict[str, Any] | None = None
+    observed_request_bytes: dict[str, int] | None = None
+    producer_results_evidence: str | None = None
     error: str | None = None
 
 
@@ -206,6 +232,32 @@ class ControlRecord:
     producer_exit: int | None
     samples: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
+
+
+def _print_diagnostic_failure_summary(
+    combinations: list[dict[str, Any]],
+    *,
+    file: TextIO,
+) -> None:
+    for combo in combinations:
+        workload = combo.get("workload")
+        concurrency = combo.get("concurrency")
+        for sample_index, sample in enumerate(combo.get("samples") or [], start=1):
+            for row in sample.get("failure_diagnostics") or []:
+                print(
+                    "diagnostic failure "
+                    f"workload={workload} concurrency={concurrency} "
+                    f"sample={sample_index} sequence={row.get('sequence')} "
+                    f"execution_id={row.get('execution_id')} phase={row.get('phase')} "
+                    f"bucket={row.get('bucket')} "
+                    f"job_error_code={row.get('job_error_code')} "
+                    f"job_error_message={row.get('job_error_message')} "
+                    f"exception_type={row.get('exception_type')} "
+                    f"exception_message={row.get('exception_message')} "
+                    f"exception_repr={row.get('exception_repr')} "
+                    f"detail={row.get('detail')}",
+                    file=file,
+                )
 
 
 def probe_role_origins(
@@ -377,6 +429,7 @@ def _run_benchmark_pass(
             profile=profile,
             workload=workload,
             concurrency=concurrency,
+            producer_exit=producer_code,
         )
         samples = list(results.get("samples") or [])
         return producer_code, samples, results
@@ -550,6 +603,11 @@ def verify_python_version(
                 worker_mode="success",
                 log_dir=log_dir,
             )
+            evidence_rel = f"evidence/{workload}/{concurrency}/producer_results.json"
+            evidence_path = evidence_dir / evidence_rel
+            evidence_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_evidence(evidence_path, results)
+            observed_bytes = results.get("observed_request_bytes")
             record = CombinationRecord(
                 workload=workload,
                 concurrency=concurrency,
@@ -558,10 +616,18 @@ def verify_python_version(
                 samples=samples,
                 baseline_eligible=bool(results.get("baseline_eligible")),
                 effective_timing=dict(results.get("effective_timing") or {}),
+                observed_request_bytes=(
+                    dict(observed_bytes) if isinstance(observed_bytes, dict) else None
+                ),
+                producer_results_evidence=evidence_rel,
             )
             if code != EXIT_OK:
                 record.error = f"producer exit {code}"
                 combo_records.append(record)
+                if profile == "diagnostic":
+                    continue
+                if profile == "baseline":
+                    continue
                 raise PerformanceError(record.error)
             combo_records.append(record)
 
@@ -571,6 +637,11 @@ def verify_python_version(
             if seen != expected:
                 raise PerformanceError(
                     f"baseline requires {len(expected)} unique combinations, saw {len(seen)}",
+                )
+            failed = [item for item in combo_records if item.error]
+            if failed:
+                error = "; ".join(
+                    f"{item.workload}@{item.concurrency}: {item.error}" for item in failed
                 )
 
         if run_controls:
@@ -633,6 +704,8 @@ def verify_python_version(
                     "producer_exit": item.producer_exit,
                     "baseline_eligible": item.baseline_eligible,
                     "effective_timing": item.effective_timing,
+                    "observed_request_bytes": item.observed_request_bytes,
+                    "producer_results_evidence": item.producer_results_evidence,
                     "samples": item.samples,
                     "error": item.error,
                 }
@@ -665,10 +738,141 @@ def collect_python_versions(args: argparse.Namespace) -> tuple[str, ...]:
     return tuple(dict.fromkeys(versions))
 
 
+def _benchmark_outcome_error(combinations: list[dict[str, Any]]) -> str | None:
+    messages: list[str] = []
+    for combo in combinations:
+        exit_code = int(combo.get("producer_exit") or 0)
+        combo_error = combo.get("error")
+        if exit_code != EXIT_OK or combo_error:
+            label = f"{combo.get('workload')}@{combo.get('concurrency')}"
+            if combo_error:
+                messages.append(f"{label}: {combo_error}")
+            elif exit_code != EXIT_OK:
+                messages.append(f"{label}: producer exit {exit_code}")
+    if not messages:
+        return None
+    return "; ".join(messages)
+
+
+def _runtime_summary_path(artifact_dir: Path, python_version: str) -> Path:
+    tag = runtime_evidence_tag(python_version)
+    return artifact_dir / tag / "summary.json"
+
+
+def _load_runtime_summary(artifact_dir: Path, python_version: str) -> dict[str, Any] | None:
+    path = _runtime_summary_path(artifact_dir, python_version)
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _absorb_runtime_payload(
+    payload: dict[str, Any],
+    *,
+    report_combinations: list[dict[str, Any]],
+    report_controls: list[dict[str, Any]],
+    report_origins: dict[str, Any] | None,
+    report_environment: dict[str, Any] | None,
+    broker_store_path: Path | None,
+    report_date: str,
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    Path | None,
+]:
+    combinations = list(payload.get("combinations") or [])
+    if combinations:
+        report_combinations.extend(combinations)
+    controls = list(payload.get("controls") or [])
+    if controls:
+        report_controls.extend(controls)
+    origins = payload.get("origins")
+    if origins:
+        report_origins = origins
+    snapshot = payload.get("environment_snapshot")
+    if snapshot:
+        enriched = dict(snapshot)
+        enriched["report_date"] = report_date
+        report_environment = enriched
+    store_raw = payload.get("broker_store_path")
+    if store_raw:
+        broker_store_path = Path(store_raw)
+    return (
+        report_combinations,
+        report_controls,
+        report_origins,
+        report_environment,
+        broker_store_path,
+    )
+
+
+def _write_profile_report(
+    path: Path,
+    *,
+    profile: str,
+    baseline_eligible: bool,
+    combinations: list[dict[str, Any]],
+    controls: list[dict[str, Any]],
+    repo_root: Path,
+    origins: dict[str, Any] | None,
+    broker_store_path: Path | None,
+    report_date: str,
+    environment: dict[str, Any] | None,
+    run_success: bool,
+    harness_exit_code: int,
+    error: str | None,
+) -> dict[str, Any]:
+    report = build_report_payload(
+        profile=profile,
+        baseline_eligible=baseline_eligible,
+        combinations=combinations,
+        controls=controls,
+        repo_root=repo_root,
+        origins=origins,
+        broker_store_path=broker_store_path,
+        report_date=report_date,
+        environment=environment,
+    )
+    report = finalize_run_outcome(
+        report,
+        run_success=run_success,
+        harness_exit_code=harness_exit_code,
+        error=error,
+    )
+    write_json_report(path, report)
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python", action="append", dest="python_versions")
     parser.add_argument("--smoke", action="store_true", help="Short non-baseline profile.")
+    parser.add_argument(
+        "--diagnostic",
+        action="store_true",
+        help="Focused non-baseline profile (3x20s windows); ineligible for dated baselines.",
+    )
+    parser.add_argument(
+        "--diagnostic-full-order",
+        action="store_true",
+        help=(
+            "With --diagnostic, run telemetry/manifest at concurrency 1 and 8 "
+            "in original baseline order on one broker (non-baseline)."
+        ),
+    )
+    parser.add_argument(
+        "--workload",
+        choices=WORKLOADS,
+        help="Single workload for --diagnostic (default manifest).",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        choices=CONCURRENCY_LEVELS,
+        help="Single concurrency for --diagnostic (default 8).",
+    )
     parser.add_argument(
         "--skip-contract-typing",
         action="store_true",
@@ -689,7 +893,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    profile_name = "smoke" if args.smoke else "baseline"
+    if args.smoke and args.diagnostic:
+        parser.error("--smoke and --diagnostic are mutually exclusive.")
+    if not args.diagnostic and args.diagnostic_full_order:
+        parser.error("--diagnostic-full-order requires --diagnostic.")
+    if args.diagnostic_full_order and (
+        args.workload is not None or args.concurrency is not None
+    ):
+        parser.error(
+            "--diagnostic-full-order is incompatible with --workload and --concurrency.",
+        )
+    if (args.workload is not None or args.concurrency is not None) and not args.diagnostic:
+        parser.error("--workload and --concurrency require --diagnostic.")
+
+    profile_name = "diagnostic" if args.diagnostic else ("smoke" if args.smoke else "baseline")
     python_versions = collect_python_versions(args)
     if len(python_versions) != 1:
         parser.error("Select exactly one Python runtime per performance run.")
@@ -697,25 +914,42 @@ def main(argv: list[str] | None = None) -> int:
     parent.mkdir(parents=True, exist_ok=True)
     assert_work_parent_outside_repo(parent)
     work_dir = Path(tempfile.mkdtemp(prefix="superjobs-performance-", dir=parent))
-    artifact_dir = args.artifact_dir or Path(
-        tempfile.mkdtemp(prefix="superjobs-performance-artifacts-", dir=parent),
+    artifact_dir = (
+        args.artifact_dir / f"run-{uuid.uuid4().hex}"
+        if args.artifact_dir is not None
+        else Path(tempfile.mkdtemp(prefix="superjobs-performance-artifacts-", dir=parent))
     )
     artifact_dir.mkdir(parents=True, exist_ok=True)
     owns_default_artifacts = args.artifact_dir is None
 
     if profile_name == "smoke":
         combinations = [("telemetry", 1)]
+    elif profile_name == "diagnostic":
+        if args.diagnostic_full_order:
+            combinations = [
+                ("telemetry", 1),
+                ("telemetry", 8),
+                ("manifest", 1),
+                ("manifest", 8),
+            ]
+        else:
+            workload = args.workload or "manifest"
+            concurrency = args.concurrency or 8
+            combinations = [(workload, concurrency)]
     else:
         combinations = [(workload, level) for workload in WORKLOADS for level in CONCURRENCY_LEVELS]
 
     exit_code = 0
     run_error: BaseException | None = None
+    run_error_message: str | None = None
     report_combinations: list[dict[str, Any]] = []
     report_controls: list[dict[str, Any]] = []
     report_origins: dict[str, Any] | None = None
     report_environment: dict[str, Any] | None = None
     broker_store_path: Path | None = None
     report_baseline_eligible = profile_name == "baseline"
+    diagnostic_failure = False
+    benchmark_outcome_failed = False
     try:
         if not args.skip_contract_typing:
             run_performance_typing_gate()
@@ -744,17 +978,78 @@ def main(argv: list[str] | None = None) -> int:
             for combo in payload.get("combinations") or []:
                 if combo.get("baseline_eligible") is False:
                     report_baseline_eligible = False
+                if profile_name == "diagnostic" and int(combo.get("producer_exit") or 0) != EXIT_OK:
+                    diagnostic_failure = True
             store_raw = payload.get("broker_store_path")
             if store_raw:
                 broker_store_path = Path(store_raw)
+            if profile_name == "baseline" and payload.get("error"):
+                benchmark_outcome_failed = True
+        if profile_name == "baseline":
+            outcome_error = _benchmark_outcome_error(report_combinations)
+            if outcome_error:
+                benchmark_outcome_failed = True
+                run_error_message = outcome_error
+                exit_code = EXIT_VALIDATION
+                print(f"verify_performance: {outcome_error}", file=sys.stderr)
+        if profile_name == "diagnostic" and diagnostic_failure:
+            exit_code = EXIT_VALIDATION
+            run_error_message = (
+                "diagnostic run recorded producer validation failures; see failure_diagnostics"
+            )
+            run_error = PerformanceError(run_error_message)
     except (PerformanceError, VerificationError, KeyboardInterrupt) as exc:
         exit_code = 1
         run_error = exc
+        run_error_message = str(exc)
         print(f"verify_performance: {exc}", file=sys.stderr)
+        for py_version in python_versions:
+            recovered = _load_runtime_summary(artifact_dir, py_version)
+            if recovered is None:
+                continue
+            (
+                report_combinations,
+                report_controls,
+                report_origins,
+                report_environment,
+                broker_store_path,
+            ) = _absorb_runtime_payload(
+                recovered,
+                report_combinations=report_combinations,
+                report_controls=report_controls,
+                report_origins=report_origins,
+                report_environment=report_environment,
+                broker_store_path=broker_store_path,
+                report_date=args.report_date,
+            )
+            if recovered.get("error") and run_error_message is None:
+                run_error_message = str(recovered["error"])
     except BaseException as exc:
         exit_code = 1
         run_error = exc
+        run_error_message = str(exc) if str(exc) else type(exc).__name__
         print(f"verify_performance: {exc}", file=sys.stderr)
+        for py_version in python_versions:
+            recovered = _load_runtime_summary(artifact_dir, py_version)
+            if recovered is None:
+                continue
+            (
+                report_combinations,
+                report_controls,
+                report_origins,
+                report_environment,
+                broker_store_path,
+            ) = _absorb_runtime_payload(
+                recovered,
+                report_combinations=report_combinations,
+                report_controls=report_controls,
+                report_origins=report_origins,
+                report_environment=report_environment,
+                broker_store_path=broker_store_path,
+                report_date=args.report_date,
+            )
+            if recovered.get("error") and run_error_message is None:
+                run_error_message = str(recovered["error"])
     finally:
         print(f"Artifact directory: {artifact_dir}", file=sys.stderr)
         if run_error is not None:
@@ -764,8 +1059,15 @@ def main(argv: list[str] | None = None) -> int:
         elif work_dir.exists():
             shutil.rmtree(work_dir, ignore_errors=True)
 
+    run_success = exit_code == EXIT_OK
+    report_error = run_error_message
+    if benchmark_outcome_failed and run_error_message:
+        report_error = run_error_message
+
     if exit_code == 0 and report_baseline_eligible:
-        report = build_report_payload(
+        stamp = args.report_date
+        report = _write_profile_report(
+            args.baseline_dir / f"{stamp}-baseline.json",
             profile=profile_name,
             baseline_eligible=True,
             combinations=report_combinations,
@@ -773,17 +1075,41 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=REPO_ROOT,
             origins=report_origins,
             broker_store_path=broker_store_path,
-            report_date=args.report_date,
+            report_date=stamp,
             environment=report_environment,
+            run_success=True,
+            harness_exit_code=EXIT_OK,
+            error=None,
         )
-        stamp = report["date"] or args.report_date
-        if not stamp:
-            raise PerformanceError("baseline profile requires --report-date when writing artifacts")
-        write_json_report(args.baseline_dir / f"{stamp}-baseline.json", report)
         write_markdown_report(args.baseline_dir / f"{stamp}-baseline.md", report)
         print(f"Baseline written to {args.baseline_dir}")
-    elif exit_code == 0 and profile_name == "smoke":
-        report = build_report_payload(
+    elif profile_name == "baseline" and not run_success:
+        stamp = args.report_date
+        report = _write_profile_report(
+            args.baseline_dir / f"{stamp}-failed-baseline.json",
+            profile=profile_name,
+            baseline_eligible=False,
+            combinations=report_combinations,
+            controls=report_controls,
+            repo_root=REPO_ROOT,
+            origins=report_origins,
+            broker_store_path=broker_store_path,
+            report_date=stamp,
+            environment=report_environment,
+            run_success=False,
+            harness_exit_code=exit_code,
+            error=report_error,
+        )
+        write_markdown_report(args.baseline_dir / f"{stamp}-failed-baseline.md", report)
+        print(
+            f"Failed baseline attempt (ineligible) written to "
+            f"{args.baseline_dir / f'{stamp}-failed-baseline.json'}",
+            file=sys.stderr,
+        )
+    elif profile_name == "smoke":
+        smoke_path = artifact_dir / "smoke-report.json"
+        report = _write_profile_report(
+            smoke_path,
             profile=profile_name,
             baseline_eligible=False,
             combinations=report_combinations,
@@ -793,10 +1119,39 @@ def main(argv: list[str] | None = None) -> int:
             broker_store_path=broker_store_path,
             report_date=args.report_date,
             environment=report_environment,
+            run_success=run_success,
+            harness_exit_code=exit_code,
+            error=report_error,
         )
-        smoke_path = artifact_dir / "smoke-report.json"
-        write_json_report(smoke_path, report)
-        print(f"Smoke report (non-baseline): {smoke_path}")
+        if run_success:
+            print(f"Smoke report (non-baseline): {smoke_path}")
+        else:
+            print(f"Smoke report with harness failure (non-baseline): {smoke_path}", file=sys.stderr)
+    elif profile_name == "diagnostic":
+        diagnostic_path = artifact_dir / "diagnostic-report.json"
+        report = _write_profile_report(
+            diagnostic_path,
+            profile=profile_name,
+            baseline_eligible=False,
+            combinations=report_combinations,
+            controls=report_controls,
+            repo_root=REPO_ROOT,
+            origins=report_origins,
+            broker_store_path=broker_store_path,
+            report_date=args.report_date,
+            environment=report_environment,
+            run_success=run_success,
+            harness_exit_code=exit_code,
+            error=report_error,
+        )
+        _print_diagnostic_failure_summary(report_combinations, file=sys.stderr)
+        if run_success:
+            print(f"Diagnostic report (non-baseline): {diagnostic_path}")
+        else:
+            print(
+                f"Diagnostic report with failures (non-baseline): {diagnostic_path}",
+                file=sys.stderr,
+            )
 
     if exit_code != 0:
         return exit_code
