@@ -88,6 +88,14 @@ uv run --no-project --python 3.12 --with . --with pytest python -m pytest tests/
 - Raw child logs and harness evidence: each explicit `--artifact-dir` gets a fresh `run-<token>` child directory, preserving prior invocations and preventing stale recovery after setup failures. Default evidence is temporary; raw logs are not committed.
 - Environment block includes git revision and cleanliness, child-runtime origins (not harness packages), owned broker JetStream store path, optional `--report-date`, and hardware/storage evidence from read-only PowerShell inspection when available (`unknown` otherwise).
 
+## Verification on 2026-10-03
+
+The final high-resolution baseline is recorded in `docs/performance-baselines/high-resolution/2026-10-03-baseline.{json,md}`. It measured clean implementation `2f7797f04107aea6ae7f65b8d65c50cea1dbe912`, one installed Python 3.12.11 runtime, and disk-backed NATS 2.15.0 on the documented Windows SSD host. All four combinations retained three 20-second intervals after a three-second warmup; harness and producers exited zero. Failure, validation, incomplete-drain, failed-submission and uncertain-submission counts were zero. The 21 late successful completions were excluded from throughput. Measured wire sizes were 1041–1043 bytes for telemetry and 65547–65549 bytes for manifest, derived from producer evidence rather than the nominal first fixture.
+
+Sample rates (jobs/s) were telemetry/1: 15.95, 15.85, 15.40; telemetry/8: 98.40, 80.95, 72.95; manifest/1: 7.40, 7.60, 7.40; manifest/8: 75.30, 63.85, 55.25. These show material within-run variation, not universal targets. No compatible historical baseline exists: earlier failed measurements used a different clock. A passing final run does not explain or repair earlier intermittent observation replay errors; retain the failed and diagnostic artifacts and follow [issue #27](https://github.com/vschroeter/superjobs/issues/27).
+
+Independent focused checks passed: 39 deterministic tests before the final invocation-isolation correction, then four relevant regression tests covering stale-summary rejection, partial recovery and installed clock metadata. Positive and exact two-negative performance consumer checks passed. The existing source/wheel public typing gate passed, including its negative consumers and 24 installed runtime checks. A separate installed producer/worker smoke exercised failure (exit 4), successful delay (exit 0), and incomplete drain (exit 5); full measurements exclude these controls. Both roles' wheel-origin probes passed in the final run. Raw logs, role origins and producer results remain under `dist/performance-final-high-resolution-2026-10-03/run-a1590aae56e04affaed9521d9b74b8a9/py312/`; only small dated reports are tracked.
+
 ## API friction (first slice)
 
 Documented in generated reports and kept in sync with the harness:
