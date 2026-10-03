@@ -1,0 +1,571 @@
+{
+  "schema": "superjobs-performance-baseline/v1",
+  "date": "2026-10-03",
+  "profile": "baseline",
+  "baseline_eligible": true,
+  "environment": {
+    "revision": "2f7797f04107aea6ae7f65b8d65c50cea1dbe912",
+    "revision_clean": true,
+    "report_date": "2026-10-03",
+    "platform": {
+      "system": "Windows",
+      "release": "11",
+      "machine": "AMD64"
+    },
+    "hardware": {
+      "source": "powershell_readonly",
+      "cpu_model": "AMD Ryzen 9 9950X 16-Core Processor            ",
+      "cpu_cores": 16,
+      "cpu_logical": 32,
+      "ram_bytes": 66094223360,
+      "os_caption": "Microsoft Windows 11 Pro",
+      "c_drive_media_type": null,
+      "c_drive_model": "Samsung SSD 990 PRO 4TB",
+      "c_drive_disk_number": 0,
+      "c_drive_storage_medium": "ssd",
+      "c_drive_storage_evidence": "C: maps to Disk0 model='Samsung SSD 990 PRO 4TB' media_type=None"
+    },
+    "storage_medium": "ssd",
+    "storage_evidence": "broker store on C:; C: maps to Disk0 model='Samsung SSD 990 PRO 4TB' media_type=None",
+    "broker_jetstream_store_path": "C:\\Users\\schoc\\AppData\\Local\\Temp\\superjobs-nats-b8k0etov\\store",
+    "harness_python": "3.12.11 (main, Jun  4 2025, 17:41:36) [MSC v.1943 64 bit (AMD64)]",
+    "child_runtime": {
+      "producer": {
+        "python": "3.12.11 (main, Jun  4 2025, 17:41:36)",
+        "superjobs": "0.1.0",
+        "faststream": "0.7.7",
+        "nats-py": "2.16.0",
+        "msgpack": "1.2.3",
+        "pydantic": "2.13.5"
+      },
+      "worker": {
+        "python": "3.12.11 (main, Jun  4 2025, 17:41:36)",
+        "superjobs": "0.1.0",
+        "faststream": "0.7.7",
+        "nats-py": "2.16.0",
+        "msgpack": "1.2.3",
+        "pydantic": "2.13.5"
+      }
+    },
+    "measurement_clock": {
+      "function": "perf_counter",
+      "implementation": "QueryPerformanceCounter()",
+      "resolution": 1e-07,
+      "monotonic": true,
+      "adjustable": false
+    },
+    "legacy_monotonic_clock": {
+      "function": "monotonic",
+      "implementation": "GetTickCount64()",
+      "resolution": 0.015625,
+      "monotonic": true,
+      "adjustable": false
+    },
+    "dependencies_note": "child_runtime versions come from isolated importlib.metadata probes in each role venv",
+    "nats_server_version": "2.15.0",
+    "fixture_request_bytes": {
+      "telemetry": 1041,
+      "manifest": 65547
+    }
+  },
+  "combinations": [
+    {
+      "workload": "telemetry",
+      "concurrency": 1,
+      "inflight": 1,
+      "producer_exit": 0,
+      "baseline_eligible": true,
+      "effective_timing": {
+        "drain_seconds": 60.0,
+        "sample_count": 3,
+        "sample_seconds": 20.0,
+        "warmup_seconds": 3.0
+      },
+      "observed_request_bytes": {
+        "max": 1043,
+        "min": 1041
+      },
+      "producer_results_evidence": "evidence/telemetry/1/producer_results.json",
+      "samples": [
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 319,
+            "success_late_drain": 1,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.006901899934746325,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.001437700004317,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 20.001436999998987,
+          "submit_latency_seconds": {
+            "median": 0.001667100004851818,
+            "n": 320,
+            "p95": 0.002125534997321665,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.056360049988143146,
+            "n": 320,
+            "p95": 0.06010016005020597,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 15.95,
+          "window_seconds": 20.001437700004317
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 317,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 8.09994526207447e-06,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.01553440000862,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.988147799973376,
+          "submit_latency_seconds": {
+            "median": 0.0017064999556168914,
+            "n": 317,
+            "p95": 0.0021440600045025348,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.0561510999687016,
+            "n": 317,
+            "p95": 0.069243000051938,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 15.85,
+          "window_seconds": 20.01553440000862
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 308,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 7.6000578701496124e-06,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.008049699943513,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.9772220000159,
+          "submit_latency_seconds": {
+            "median": 0.0017469999729655683,
+            "n": 308,
+            "p95": 0.0021984250168316064,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.05595300003187731,
+            "n": 308,
+            "p95": 0.06967291002511047,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 15.4,
+          "window_seconds": 20.008049699943513
+        }
+      ],
+      "error": null,
+      "throughput_variation": {
+        "min": 15.4,
+        "max": 15.95,
+        "spread": 0.5499999999999989
+      }
+    },
+    {
+      "workload": "telemetry",
+      "concurrency": 8,
+      "inflight": 8,
+      "producer_exit": 0,
+      "baseline_eligible": true,
+      "effective_timing": {
+        "drain_seconds": 60.0,
+        "sample_count": 3,
+        "sample_seconds": 20.0,
+        "warmup_seconds": 3.0
+      },
+      "observed_request_bytes": {
+        "max": 1043,
+        "min": 1041
+      },
+      "producer_results_evidence": "evidence/telemetry/8/producer_results.json",
+      "samples": [
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1968,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.0009229000424966216,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.000060299993493,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.977999199996702,
+          "submit_latency_seconds": {
+            "median": 0.002029700030107051,
+            "n": 1968,
+            "p95": 0.007370379933854563,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.054303850047290325,
+            "n": 1968,
+            "p95": 0.07226406497647984,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 98.4,
+          "window_seconds": 20.000060299993493
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1619,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 7.899943739175797e-06,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.005718100001104,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.979400699958205,
+          "submit_latency_seconds": {
+            "median": 0.0019708999898284674,
+            "n": 1619,
+            "p95": 0.010627829981967802,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.05608590005431324,
+            "n": 1619,
+            "p95": 0.07765481000533327,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 80.95,
+          "window_seconds": 20.005718100001104
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1459,
+            "success_late_drain": 4,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.07113589998334646,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.00528500007931,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.98362700000871,
+          "submit_latency_seconds": {
+            "median": 0.0019221999682486057,
+            "n": 1463,
+            "p95": 0.014384989999234675,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.057637999998405576,
+            "n": 1463,
+            "p95": 0.0970304800313897,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 72.95,
+          "window_seconds": 20.00528500007931
+        }
+      ],
+      "error": null,
+      "throughput_variation": {
+        "min": 72.95,
+        "max": 98.4,
+        "spread": 25.450000000000003
+      }
+    },
+    {
+      "workload": "manifest",
+      "concurrency": 1,
+      "inflight": 1,
+      "producer_exit": 0,
+      "baseline_eligible": true,
+      "effective_timing": {
+        "drain_seconds": 60.0,
+        "sample_count": 3,
+        "sample_seconds": 20.0,
+        "warmup_seconds": 3.0
+      },
+      "observed_request_bytes": {
+        "max": 65549,
+        "min": 65547
+      },
+      "producer_results_evidence": "evidence/manifest/1/producer_results.json",
+      "samples": [
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 148,
+            "success_late_drain": 1,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.009336799965240061,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.0114735000534,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 20.01147290004883,
+          "submit_latency_seconds": {
+            "median": 0.023284599999897182,
+            "n": 149,
+            "p95": 0.055612460034899405,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.13198289996944368,
+            "n": 149,
+            "p95": 0.1634384999983013,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 7.4,
+          "window_seconds": 20.0114735000534
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 152,
+            "success_late_drain": 1,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.011123399948701262,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.01432850002311,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.998819099972025,
+          "submit_latency_seconds": {
+            "median": 0.02256800001487136,
+            "n": 153,
+            "p95": 0.053210979979485276,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.1319870000006631,
+            "n": 153,
+            "p95": 0.1617565399734303,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 7.6,
+          "window_seconds": 20.01432850002311
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 148,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 4.500034265220165e-06,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.00597379996907,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.981809900025837,
+          "submit_latency_seconds": {
+            "median": 0.022333400032948703,
+            "n": 148,
+            "p95": 0.05335875996388495,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.13273040001513436,
+            "n": 148,
+            "p95": 0.16293541503255254,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 7.4,
+          "window_seconds": 20.00597379996907
+        }
+      ],
+      "error": null,
+      "throughput_variation": {
+        "min": 7.4,
+        "max": 7.6,
+        "spread": 0.1999999999999993
+      }
+    },
+    {
+      "workload": "manifest",
+      "concurrency": 8,
+      "inflight": 8,
+      "producer_exit": 0,
+      "baseline_eligible": true,
+      "effective_timing": {
+        "drain_seconds": 60.0,
+        "sample_count": 3,
+        "sample_seconds": 20.0,
+        "warmup_seconds": 3.0
+      },
+      "observed_request_bytes": {
+        "max": 65549,
+        "min": 65547
+      },
+      "producer_results_evidence": "evidence/manifest/8/producer_results.json",
+      "samples": [
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1506,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.004778699949383736,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.00139260001015,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.952707599964924,
+          "submit_latency_seconds": {
+            "median": 0.003373949963133782,
+            "n": 1506,
+            "p95": 0.00923994995537214,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.06789254996692762,
+            "n": 1506,
+            "p95": 0.12107655001454987,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 75.3,
+          "window_seconds": 20.00139260001015
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1277,
+            "success_late_drain": 7,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.04581260005943477,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.008422099985182,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.97623679996468,
+          "submit_latency_seconds": {
+            "median": 0.0031448499648831785,
+            "n": 1284,
+            "p95": 0.011259229987626893,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.09488669998245314,
+            "n": 1284,
+            "p95": 0.12323169003357178,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 63.85,
+          "window_seconds": 20.008422099985182
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1105,
+            "success_late_drain": 7,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.0841244999319315,
+          "drain_overrun_seconds": 0.0,
+          "failure_diagnostics": [],
+          "submission_boundary_reached_seconds": 20.01318440004252,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.99248140002601,
+          "submit_latency_seconds": {
+            "median": 0.003082099952735007,
+            "n": 1112,
+            "p95": 0.012234194995835427,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.1038133500260301,
+            "n": 1112,
+            "p95": 0.13263538004248404,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 55.25,
+          "window_seconds": 20.01318440004252
+        }
+      ],
+      "error": null,
+      "throughput_variation": {
+        "min": 55.25,
+        "max": 75.3,
+        "spread": 20.049999999999997
+      }
+    }
+  ],
+  "controls": [],
+  "historical_comparison": null,
+  "api_friction_notes": [
+    "Producer in-flight limiting uses an explicit asyncio semaphore; SuperJobs does not expose a submit concurrency knob.",
+    "No-result telemetry jobs: awaiting outcome() is sufficient for success; calling result() is optional and raises on failure.",
+    "Manifest throughput validation replays events() to assert three ordered application events plus system terminals.",
+    "Producer sample timestamps use time.perf_counter (high resolution, monotonic). Field names ending in _mono denote a monotonic domain, not time.monotonic(). Harness readiness and child lifecycle deadlines use time.monotonic(); never subtract across processes or clock domains."
+  ],
+  "run_success": true,
+  "harness_exit_code": 0
+}

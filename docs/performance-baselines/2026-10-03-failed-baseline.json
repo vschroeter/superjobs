@@ -1,0 +1,562 @@
+{
+  "schema": "superjobs-performance-baseline/v1",
+  "date": "2026-10-03",
+  "profile": "baseline",
+  "baseline_eligible": false,
+  "environment": {
+    "revision": "af5fcecafbf6cb7b11a5528c147b6be0c74a1bb3",
+    "revision_clean": true,
+    "report_date": null,
+    "platform": {
+      "system": "Windows",
+      "release": "11",
+      "machine": "AMD64"
+    },
+    "hardware": {
+      "source": "powershell_readonly",
+      "cpu_model": "AMD Ryzen 9 9950X 16-Core Processor            ",
+      "cpu_cores": 16,
+      "cpu_logical": 32,
+      "ram_bytes": 66094223360,
+      "os_caption": "Microsoft Windows 11 Pro",
+      "c_drive_media_type": null,
+      "c_drive_model": "Samsung SSD 990 PRO 4TB",
+      "c_drive_disk_number": 0,
+      "c_drive_storage_medium": "ssd",
+      "c_drive_storage_evidence": "C: maps to Disk0 model='Samsung SSD 990 PRO 4TB' media_type=None"
+    },
+    "storage_medium": "ssd",
+    "storage_evidence": "broker store on C:; C: maps to Disk0 model='Samsung SSD 990 PRO 4TB' media_type=None",
+    "broker_jetstream_store_path": "C:\\Users\\schoc\\AppData\\Local\\Temp\\superjobs-nats-b3y72w9u\\store",
+    "harness_python": "3.12.11 (main, Jun  4 2025, 17:41:36) [MSC v.1943 64 bit (AMD64)]",
+    "child_runtime": {
+      "producer": {
+        "python": "3.12.11 (main, Jun  4 2025, 17:41:36)",
+        "superjobs": "0.1.0",
+        "faststream": "0.7.7",
+        "nats-py": "2.16.0",
+        "msgpack": "1.2.3",
+        "pydantic": "2.13.5"
+      },
+      "worker": {
+        "python": "3.12.11 (main, Jun  4 2025, 17:41:36)",
+        "superjobs": "0.1.0",
+        "faststream": "0.7.7",
+        "nats-py": "2.16.0",
+        "msgpack": "1.2.3",
+        "pydantic": "2.13.5"
+      }
+    },
+    "dependencies_note": "child_runtime versions come from isolated importlib.metadata probes in each role venv",
+    "nats_server_version": "2.15.0",
+    "fixture_request_bytes": {
+      "telemetry": 1041,
+      "manifest": 65547
+    },
+    "measurement_clock": {
+      "function": "monotonic",
+      "implementation": "GetTickCount64()",
+      "resolution": 0.015625,
+      "monotonic": true,
+      "adjustable": false,
+      "provenance": "retrospective probe of producer child Python 3.12.11 on 2026-10-03; samples in this artifact were taken with time.monotonic() before the perf_counter correction"
+    },
+    "legacy_monotonic_clock": {
+      "function": "monotonic",
+      "implementation": "GetTickCount64()",
+      "resolution": 0.015625,
+      "monotonic": true,
+      "adjustable": false
+    },
+    "measurement_clock_note": "Six submit_latency_seconds medians are 0.0 due to 15.625ms monotonic quantization; not evidence of zero submit cost. Do not ratio-compare against perf_counter baselines."
+  },
+  "combinations": [
+    {
+      "workload": "telemetry",
+      "concurrency": 1,
+      "inflight": 1,
+      "producer_exit": 0,
+      "baseline_eligible": true,
+      "effective_timing": {
+        "drain_seconds": 60.0,
+        "sample_count": 3,
+        "sample_seconds": 20.0,
+        "warmup_seconds": 3.0
+      },
+      "samples": [
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 289,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.0,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.015999999945052,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.95299999997951,
+          "submit_latency_seconds": {
+            "median": 0.0,
+            "n": 289,
+            "p95": 0.015999999945051968,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.062000000034458935,
+            "n": 289,
+            "p95": 0.0780000000493601,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 14.45,
+          "window_seconds": 20.015999999945052
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 271,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.0,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.0,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 20.0,
+          "submit_latency_seconds": {
+            "median": 0.0,
+            "n": 271,
+            "p95": 0.015999999945051968,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.06299999996554106,
+            "n": 271,
+            "p95": 0.07800000009592623,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 13.55,
+          "window_seconds": 20.0
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 267,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.0,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.0,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.968999999924563,
+          "submit_latency_seconds": {
+            "median": 0.0,
+            "n": 267,
+            "p95": 0.015999999945051968,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.06299999996554106,
+            "n": 267,
+            "p95": 0.07800000009592623,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 13.35,
+          "window_seconds": 20.0
+        }
+      ],
+      "error": null,
+      "observed_request_bytes": {
+        "max": 1043,
+        "min": 1041
+      },
+      "producer_evidence": "telemetry-1-producer-results.json",
+      "throughput_variation": {
+        "min": 13.35,
+        "max": 14.45,
+        "spread": 1.0999999999999996
+      }
+    },
+    {
+      "workload": "telemetry",
+      "concurrency": 8,
+      "inflight": 8,
+      "producer_exit": 0,
+      "baseline_eligible": true,
+      "effective_timing": {
+        "drain_seconds": 60.0,
+        "sample_count": 3,
+        "sample_seconds": 20.0,
+        "warmup_seconds": 3.0
+      },
+      "samples": [
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1821,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.0,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.01500000001397,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.95299999997951,
+          "submit_latency_seconds": {
+            "median": 0.0,
+            "n": 1821,
+            "p95": 0.01600000006146729,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.062000000034458935,
+            "n": 1821,
+            "p95": 0.0779999999795109,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 91.05,
+          "window_seconds": 20.01500000001397
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1531,
+            "success_late_drain": 8,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.06299999996554106,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.0,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 20.0,
+          "submit_latency_seconds": {
+            "median": 0.0,
+            "n": 1539,
+            "p95": 0.01600000006146729,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.062000000034458935,
+            "n": 1539,
+            "p95": 0.09309999998658887,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 76.55,
+          "window_seconds": 20.0
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1448,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.0,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.0,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.969000000040978,
+          "submit_latency_seconds": {
+            "median": 0.0,
+            "n": 1448,
+            "p95": 0.01600000006146729,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.062000000034458935,
+            "n": 1448,
+            "p95": 0.10899999993853271,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 72.4,
+          "window_seconds": 20.0
+        }
+      ],
+      "error": null,
+      "observed_request_bytes": {
+        "max": 1043,
+        "min": 1041
+      },
+      "producer_evidence": "telemetry-8-producer-results.json",
+      "throughput_variation": {
+        "min": 72.4,
+        "max": 91.05,
+        "spread": 18.64999999999999
+      }
+    },
+    {
+      "workload": "manifest",
+      "concurrency": 1,
+      "inflight": 1,
+      "producer_exit": 0,
+      "baseline_eligible": true,
+      "effective_timing": {
+        "drain_seconds": 60.0,
+        "sample_count": 3,
+        "sample_seconds": 20.0,
+        "warmup_seconds": 3.0
+      },
+      "samples": [
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 147,
+            "success_late_drain": 1,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.015000000013969839,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.015999999945052,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 20.015999999945052,
+          "submit_latency_seconds": {
+            "median": 0.01600000006146729,
+            "n": 148,
+            "p95": 0.0470000000204891,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.14000000001396984,
+            "n": 148,
+            "p95": 0.15700000000651926,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 7.35,
+          "window_seconds": 20.015999999945052
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 151,
+            "success_late_drain": 1,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.062000000034458935,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.015999999945052,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 20.015999999945052,
+          "submit_latency_seconds": {
+            "median": 0.015999999945051968,
+            "n": 152,
+            "p95": 0.0470000000204891,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.14000000001396984,
+            "n": 152,
+            "p95": 0.15700000000651926,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 7.55,
+          "window_seconds": 20.015999999945052
+        },
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 151,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.0,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.0,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.95299999997951,
+          "submit_latency_seconds": {
+            "median": 0.015000000013969839,
+            "n": 151,
+            "p95": 0.0470000000204891,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.125,
+            "n": 151,
+            "p95": 0.1559999999590218,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 7.55,
+          "window_seconds": 20.0
+        }
+      ],
+      "error": null,
+      "observed_request_bytes": {
+        "max": 65549,
+        "min": 65547
+      },
+      "producer_evidence": "manifest-1-producer-results.json",
+      "throughput_variation": {
+        "min": 7.35,
+        "max": 7.55,
+        "spread": 0.20000000000000018
+      }
+    },
+    {
+      "workload": "manifest",
+      "concurrency": 8,
+      "inflight": 8,
+      "producer_exit": 4,
+      "baseline_eligible": true,
+      "effective_timing": {
+        "drain_seconds": 60.0,
+        "sample_count": 3,
+        "sample_seconds": 20.0,
+        "warmup_seconds": 3.0
+      },
+      "samples": [
+        {
+          "counts": {
+            "failure": 0,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1202,
+            "success_late_drain": 4,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.045999999972991645,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.0,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.95299999997951,
+          "submit_latency_seconds": {
+            "median": 0.0,
+            "n": 1206,
+            "p95": 0.030999999959021807,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.0940000000409782,
+            "n": 1206,
+            "p95": 0.125,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 60.1,
+          "window_seconds": 20.0
+        },
+        {
+          "counts": {
+            "failure": 5,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1090,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.01600000006146729,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.0,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.95400000002701,
+          "submit_latency_seconds": {
+            "median": 0.0,
+            "n": 1090,
+            "p95": 0.01600000006146729,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.10900000005494803,
+            "n": 1090,
+            "p95": 0.1559999999590218,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 54.5,
+          "window_seconds": 20.0
+        },
+        {
+          "counts": {
+            "failure": 1,
+            "incomplete_drain": 0,
+            "submit_failed": 0,
+            "submit_uncertain": 0,
+            "success_in_window": 1016,
+            "success_late_drain": 0,
+            "validation_error": 0
+          },
+          "drain_elapsed_seconds": 0.01600000006146729,
+          "drain_overrun_seconds": 0.0,
+          "submission_boundary_reached_seconds": 20.0,
+          "submission_boundary_seconds": 20.0,
+          "submission_loop_stop_seconds": 19.98499999998603,
+          "submit_latency_seconds": {
+            "median": 0.0,
+            "n": 1016,
+            "p95": 0.01600000006146729,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "submit_to_terminal_seconds": {
+            "median": 0.10999999998603016,
+            "n": 1016,
+            "p95": 0.15700000000651926,
+            "scope": "successful_completions_including_late_drain_for_latency_only"
+          },
+          "throughput_interval_seconds": 20.0,
+          "throughput_per_second": 50.8,
+          "window_seconds": 20.0
+        }
+      ],
+      "error": "producer exit 4",
+      "observed_request_bytes": {
+        "max": 65549,
+        "min": 65547
+      },
+      "producer_evidence": "manifest-8-producer-results.json",
+      "throughput_variation": {
+        "min": 50.8,
+        "max": 60.1,
+        "spread": 9.300000000000004
+      }
+    }
+  ],
+  "controls": [],
+  "historical_comparison": null,
+  "api_friction_notes": [
+    "Producer in-flight limiting uses an explicit asyncio semaphore; SuperJobs does not expose a submit concurrency knob.",
+    "No-result telemetry jobs: awaiting outcome() is sufficient for success; calling result() is optional and raises on failure.",
+    "Manifest throughput validation replays events() to assert three ordered application events plus system terminals."
+  ],
+  "run_outcome": "failed",
+  "harness_exit_code": 1,
+  "error": "producer exit 4",
+  "measurement_provenance": "Original twelve-window run at af5fcec; fixture ranges copied from emitted producer JSON before owned temporary cleanup. Failure buckets include terminal failures or producer exceptions; details were not retained by this implementation."
+}
