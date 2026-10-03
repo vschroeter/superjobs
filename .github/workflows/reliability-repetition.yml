@@ -1,0 +1,36 @@
+name: reliability-repetition
+
+on:
+  schedule:
+    # Sunday 04:15 UTC — low-contention weekly window.
+    - cron: "15 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repetition:
+    name: reliability / repetition (linux, py3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Bounded reliability repetition
+        run: >
+          uv run --isolated --no-project --with-editable .
+          --python 3.14
+          --with "pytest>=9.1.1" --with "pytest-asyncio>=1.4.0"
+          python tools/verify_reliability_repetition.py
+          --artifact-dir dist/verification/reliability-repetition
+      - name: Upload failure diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reliability-repetition-linux-py3.14
+          path: |
+            dist/verification/reliability-repetition/**
