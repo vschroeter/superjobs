@@ -243,7 +243,7 @@ def test_validator_runs_once_through_public_cli() -> None:
 
     cli.add("validated", job, handler=handler)
     runner = CliRunner()
-    result = runner.invoke(cli.build_typer(), ["run", "validated", "--json", '{"value": 1}'])
+    result = runner.invoke(cli.build_typer(), ["submit", "validated", "--json", '{"value": 1}'])
     assert result.exit_code == EXIT_RUNTIME_FAILURE
     assert _validator_calls == 1
 

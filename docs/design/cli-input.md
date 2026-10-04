@@ -2,8 +2,10 @@
 
 Issue [Parse strict CLI JSON inputs and generate options for flat Job requests](https://github.com/vschroeter/superjobs/issues/39)
 adds input preparation to both `run` and `submit` on `feature/cli`. Typer is the
-main CLI library, available through `superjobs[cli]`. Execution remains unavailable
-until the local and NATS execution issues land.
+main CLI library, available through `superjobs[cli]`. Local `run` execution is
+available in-process (issue #40), including the built-in isolated in-memory
+runtime when no `local_runtime_factory` is configured; remote `submit` remains
+unavailable until issue #41.
 
 ## Whole requests
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -295,19 +296,18 @@ def test_remote_only_help_does_not_call_local_factory() -> None:
     assert calls == 0
 
 
-def test_run_local_reports_unavailable() -> None:
+def test_run_local_uses_default_in_memory_factory() -> None:
     job = _echo_job()
     cli = JobCLI()
 
     async def handler(request: EchoRequest, context: JobContext[None]) -> EchoResult:
-        return EchoResult(text="x")
+        return EchoResult(text=str(request.value))
 
     cli.add("echo", job, handler=handler)
     runner = CliRunner()
     result = runner.invoke(cli.build_typer(), ["run", "echo", "--value", "1"])
-    assert result.exit_code == EXIT_RUNTIME_FAILURE
-    assert UNAVAILABLE_EXECUTION_MESSAGE in result.stderr
-    assert result.stdout == ""
+    assert result.exit_code == EXIT_SUCCESS
+    assert json.loads(result.stdout) == {"text": "1"}
 
 
 def test_submit_reports_unavailable() -> None:
@@ -336,6 +336,53 @@ def test_main_rejects_active_event_loop() -> None:
     import asyncio
 
     asyncio.run(inside_loop())
+
+
+def test_build_typer_snapshots_local_runtime_factory() -> None:
+    from contextlib import asynccontextmanager
+
+    from superjobs import InMemoryTransport, SuperJobs
+
+    job = _echo_job()
+    calls: list[str] = []
+
+    @asynccontextmanager
+    async def first_factory():
+        calls.append("first")
+        jobs = SuperJobs(transport=InMemoryTransport())
+        async with jobs:
+            yield jobs
+
+    @asynccontextmanager
+    async def second_factory():
+        calls.append("second")
+        jobs = SuperJobs(transport=InMemoryTransport())
+        async with jobs:
+            yield jobs
+
+    async def handler(request: EchoRequest, context: JobContext[None]) -> EchoResult:
+        return EchoResult(text="ok")
+
+    cli = JobCLI(local_runtime_factory=first_factory)
+    cli.add("echo", job, handler=handler)
+    app = cli.build_typer()
+    cli.local_runtime_factory = second_factory
+    result = CliRunner().invoke(app, ["run", "echo", "--value", "1"])
+    assert result.exit_code == EXIT_SUCCESS
+    assert calls == ["first"]
+
+
+def test_submit_help_notes_remote_unavailable() -> None:
+    job = _echo_job()
+    cli = JobCLI()
+
+    async def handler(request: EchoRequest, context: JobContext[None]) -> EchoResult:
+        return EchoResult(text="x")
+
+    cli.add("echo", job, handler=handler)
+    result = CliRunner().invoke(cli.build_typer(), ["submit", "echo", "--help"])
+    assert result.exit_code == EXIT_SUCCESS
+    assert "unavailable until issue #41" in " ".join(result.stdout.split())
 
 
 def test_mount_on_application_typer() -> None:
@@ -391,8 +438,19 @@ def test_marked_handler_registration() -> None:
 
 
 def test_sync_handler_registration() -> None:
+    from contextlib import asynccontextmanager
+
+    from superjobs import InMemoryTransport, SuperJobs
+
     job = _echo_job()
-    cli = JobCLI()
+
+    @asynccontextmanager
+    async def local_runtime():
+        jobs = SuperJobs(transport=InMemoryTransport())
+        async with jobs:
+            yield jobs
+
+    cli = JobCLI(local_runtime_factory=local_runtime)
 
     def sync_handler(request: EchoRequest, context: JobContext[None]) -> EchoResult:
         return EchoResult(text="sync")
@@ -400,7 +458,7 @@ def test_sync_handler_registration() -> None:
     cli.add("echo", job, handler=sync_handler)
     runner = CliRunner()
     result = runner.invoke(cli.build_typer(), ["run", "echo", "--value", "1"])
-    assert result.exit_code == EXIT_RUNTIME_FAILURE
+    assert result.exit_code == EXIT_SUCCESS
 
 
 def test_no_request_job_registration() -> None:
@@ -438,24 +496,45 @@ def test_mount_rejects_resolved_host_names_without_mutation(name: str, kind: str
     assert before == (tuple(app.registered_commands), tuple(app.registered_groups))
 
 
-def test_unavailable_modes_do_not_initialize_dependencies(capsys: pytest.CaptureFixture[str]) -> None:
+def test_unavailable_submit_does_not_initialize_dependencies(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     calls: list[str] = []
+
     def runtime_factory():
         calls.append("runtime")
         raise AssertionError("unavailable execution must not start a runtime")
+
     def handler_factory():
         calls.append("handler")
         raise AssertionError("unavailable execution must not load worker code")
+
     cli = JobCLI(local_runtime_factory=runtime_factory, remote_runtime_factory=runtime_factory)
     cli.add("lazy", Job("tests.cli.lazy.unavailable"), handler_factory=handler_factory)
-    assert cli.main(["run", "lazy"]) == EXIT_RUNTIME_FAILURE
     assert cli.main(["submit", "lazy"]) == EXIT_RUNTIME_FAILURE
     assert calls == []
     assert capsys.readouterr().out == ""
 
 
+def test_run_initializes_local_runtime_for_selected_command() -> None:
+    calls: list[str] = []
+
+    def runtime_factory():
+        calls.append("runtime")
+        raise AssertionError("handler factory must not run when runtime fails")
+
+    def handler_factory():
+        calls.append("handler")
+        raise AssertionError("handler factory must not run when runtime fails")
+
+    cli = JobCLI(local_runtime_factory=runtime_factory)
+    cli.add("lazy", Job("tests.cli.lazy.unavailable"), handler_factory=handler_factory)
+    assert cli.main(["run", "lazy"]) == EXIT_RUNTIME_FAILURE
+    assert calls == ["runtime"]
+
+
 @pytest.mark.parametrize("argv, expected", [
-    (["run", "greet", "world"], EXIT_RUNTIME_FAILURE),
+    (["run", "greet", "world"], EXIT_SUCCESS),
     (["submit", "greet-remote", "--json", '{"name":"world"}'], EXIT_RUNTIME_FAILURE),
     (["run", "greet-remote", "--json", '{"name":"world"}'], EXIT_USAGE),
     (["missing"], EXIT_USAGE),
@@ -476,6 +555,8 @@ def test_example_process_exit_conventions(argv: list[str], expected: int) -> Non
     )
     assert result.returncode == expected
     assert "Traceback" not in result.stderr
-    if expected:
+    if expected == EXIT_SUCCESS and argv[:2] == ["run", "greet"]:
+        assert json.loads(result.stdout)["message"]
+    elif expected:
         assert result.stdout == ""
         assert result.stderr.strip()

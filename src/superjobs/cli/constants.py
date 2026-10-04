@@ -19,9 +19,13 @@ RESERVED_CLI_OPTION_NAMES: frozenset[str] = frozenset(
 )
 
 UNAVAILABLE_EXECUTION_MESSAGE = (
-    "CLI execution is not available in this SuperJobs release slice; "
+    "CLI remote submission is not available in this SuperJobs release slice; "
     "input validation and help only (see docs/design/cli-input.md)."
 )
+
+# Cancellation grace period and subsequent shared cleanup budget for local run.
+# Deadlines request asyncio cancellation; they cannot kill arbitrary Python code.
+LOCAL_RUN_SHUTDOWN_TIMEOUT_SECONDS = 30.0
 
 REMOTE_ONLY_RUN_MESSAGE = (
     "Cannot run command locally: it is registered for remote submission only."

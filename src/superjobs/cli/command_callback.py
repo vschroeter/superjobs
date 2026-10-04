@@ -8,12 +8,14 @@ from typing import Any
 
 import typer
 
+from superjobs.cli.runtime_factory import LocalRuntimeFactory
 from superjobs.cli.constants import (
     EXIT_RUNTIME_FAILURE,
     EXIT_USAGE,
     REMOTE_ONLY_RUN_MESSAGE,
     UNAVAILABLE_EXECUTION_MESSAGE,
 )
+from superjobs.cli.local_run import run_local_command
 from superjobs.cli.input_prepare import internal_param_name, prepare_command_input
 from superjobs.cli.registration import CommandRegistration
 from superjobs.cli.schema_plan import CommandInputPlan, RequestFieldPlan, ScalarKind
@@ -48,6 +50,7 @@ def build_job_command_callback(
     plan: CommandInputPlan,
     *,
     mode: str,
+    local_runtime_factory: LocalRuntimeFactory | None = None,
 ) -> Callable[..., None]:
     annotations: dict[str, Any] = {"ctx": typer.Context, "return": None}
     kwdefaults: dict[str, Any] = {}
@@ -101,10 +104,19 @@ def build_job_command_callback(
             raise typer.Exit(code=EXIT_USAGE)
 
         try:
-            prepare_command_input(plan, ctx.params, ctx)
+            prepared = prepare_command_input(plan, ctx.params, ctx)
         except CLIInputError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=EXIT_USAGE) from exc
+
+        if mode == "run":
+            if local_runtime_factory is None:
+                raise RuntimeError("run command callback missing local_runtime_factory snapshot")
+            result = run_local_command(registration, prepared, local_runtime_factory)
+            if result.stdout is not None:
+                typer.echo(result.stdout)
+            raise typer.Exit(code=result.exit_code)
+
         typer.echo(UNAVAILABLE_EXECUTION_MESSAGE, err=True)
         raise typer.Exit(code=EXIT_RUNTIME_FAILURE)
 
@@ -138,7 +150,15 @@ def command_help_text(
     *,
     mode: str,
 ) -> str:
-    parts = [f"Job {registration.job.canonical_name} ({mode}; execution unavailable)."]
+    if mode == "run":
+        execution_note = (
+            "local in-process execution"
+            if registration.supports_local_run
+            else "remote-only; cannot run locally"
+        )
+    else:
+        execution_note = "remote submission unavailable until issue #41"
+    parts = [f"Job {registration.job.canonical_name} ({mode}; {execution_note})."]
     if plan.field_mode_unavailable_reason:
         parts.append(plan.field_mode_unavailable_reason)
     return " ".join(parts)

@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import Awaitable, Callable, Mapping
-from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from typing import Any, Literal, ParamSpec, TypeVar, overload
 
 from superjobs.cli.command_callback import build_job_command_callback, command_help_text
+from superjobs.cli.default_local_runtime import default_local_runtime_factory
+from superjobs.cli.runtime_factory import LocalRuntimeFactory, RemoteRuntimeFactory
 from superjobs.cli.composition import assert_mount_names_available
 from superjobs.cli.field_config import CLIField
 from superjobs.cli.constants import (
@@ -47,9 +48,6 @@ FinalT = TypeVar("FinalT")
 InterT = TypeVar("InterT")
 ConstructorP = ParamSpec("ConstructorP")
 
-LocalRuntimeFactory = Callable[[], AbstractAsyncContextManager[SuperJobs]]
-RemoteRuntimeFactory = Callable[[], AbstractAsyncContextManager[SuperJobs]]
-
 _MOUNT_GROUP_NAMES = ("run", "submit")
 
 
@@ -58,10 +56,11 @@ class JobCLI:
     """Register contract Jobs as CLI commands backed by Typer.
 
     Application code owns runtime lifetime: supply ``local_runtime_factory`` for
-    in-process execution (future slice) and ``remote_runtime_factory`` for NATS
-    submission (future slice). Factories must not be invoked for help or when a
-    command is not selected; this slice only validates registration and routes
-    ``run`` / ``submit`` to explicit unavailable handlers.
+    custom in-process ``run`` resources, or rely on the built-in isolated
+    in-memory runtime when it is omitted. ``remote_runtime_factory`` is reserved
+    for NATS ``submit`` (future slice). Factories must not be invoked for help
+    or when a command is not selected. Lazy ``handler_factory`` callables run
+    only when a local ``run`` command is selected.
 
     ``build_typer()`` and ``mount()`` snapshot the current registration table at
     call time. Later ``add()`` calls do not alter Typer objects already built or
@@ -266,12 +265,27 @@ class JobCLI:
     def registrations(self) -> tuple[CommandRegistration, ...]:
         return tuple(self._commands.values())
 
+    def _effective_local_runtime_factory(self) -> LocalRuntimeFactory:
+        if self.local_runtime_factory is not None:
+            return self.local_runtime_factory
+        return default_local_runtime_factory
+
     def _build_run_submit_groups(self) -> tuple[typer.Typer, typer.Typer]:
         run_group = typer.Typer(help="Run a Job locally in-process.")
         submit_group = typer.Typer(help="Submit a Job for remote execution.")
+        local_factory = self._effective_local_runtime_factory()
         for registration in self._commands.values():
-            self._register_command(run_group, registration, mode="run")
-            self._register_command(submit_group, registration, mode="submit")
+            self._register_command(
+                run_group,
+                registration,
+                mode="run",
+                local_runtime_factory=local_factory,
+            )
+            self._register_command(
+                submit_group,
+                registration,
+                mode="submit",
+            )
         return run_group, submit_group
 
     def _register_command(
@@ -280,6 +294,7 @@ class JobCLI:
         registration: CommandRegistration,
         *,
         mode: str,
+        local_runtime_factory: LocalRuntimeFactory | None = None,
     ) -> None:
         plan = registration.input_plan
         if plan is None:
@@ -288,7 +303,12 @@ class JobCLI:
                 positional_fields=registration.positional_fields,
                 field_options=registration.field_options,
             )
-        callback = build_job_command_callback(registration, plan, mode=mode)
+        callback = build_job_command_callback(
+            registration,
+            plan,
+            mode=mode,
+            local_runtime_factory=local_runtime_factory,
+        )
         group.command(
             name=registration.command_name,
             help=command_help_text(registration, plan, mode=mode),
@@ -296,7 +316,7 @@ class JobCLI:
 
     def build_typer(self) -> typer.Typer:
         root = typer.Typer(
-            help="SuperJobs contract commands (input validation; execution deferred).",
+            help="SuperJobs contract commands (local run and remote submit).",
             no_args_is_help=True,
             pretty_exceptions_enable=False,
         )
@@ -313,7 +333,7 @@ class JobCLI:
         app.add_typer(submit_group, name="submit")
 
     def main(self, argv: list[str] | None = None) -> int:
-        """Synchronous process entry point; owns one asyncio event loop invocation."""
+        """Synchronous process entry point for ``run`` / ``submit`` commands."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -322,13 +342,9 @@ class JobCLI:
             print(ACTIVE_EVENT_LOOP_MESSAGE, file=sys.stderr)
             return EXIT_USAGE
         try:
-            return asyncio.run(self._async_invoke(argv))
+            return self._invoke_typer(argv)
         except (KeyboardInterrupt, typer.Abort):
             return EXIT_INTERRUPTED
-
-    async def _async_invoke(self, argv: list[str] | None) -> int:
-        """Reserved for future async execution; currently runs the Typer shell."""
-        return self._invoke_typer(argv)
 
     def _invoke_typer(self, argv: list[str] | None) -> int:
         app = self.build_typer()
