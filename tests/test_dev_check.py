@@ -24,6 +24,7 @@ from scripts.dev_check.stages import (  # noqa: E402
     idle_outage_argv,
     contract_typing_argv,
     cross_program_argv,
+    cli_process_argv,
     evaluate_pytest_stage,
     evaluate_tool_stage,
     integration_pytest_argv,
@@ -260,7 +261,7 @@ def test_run_bounded_missing_command_returns_evidence(tmp_path: Path) -> None:
     assert result.stderr
 
 
-def test_integration_stages_include_idle_outage() -> None:
+def test_integration_stages_include_required_process_proofs() -> None:
     names = [stage.name for stage in INTEGRATION_STAGES]
     assert names == [
         "contract-typing",
@@ -269,6 +270,7 @@ def test_integration_stages_include_idle_outage() -> None:
         "worker-recovery",
         "broker-restart",
         "idle-outage",
+        "cli-process",
     ]
 
 
@@ -286,6 +288,9 @@ def test_integration_argv_uses_custom_artifact_dir(tmp_path: Path) -> None:
     assert str(run_dir / "broker-restart") in " ".join(restart)
     idle = idle_outage_argv(REPO_ROOT, "3.12", run_dir)
     assert str(run_dir / "idle-outage") in " ".join(idle)
+    cli = cli_process_argv(REPO_ROOT, "3.12", run_dir)
+    assert str(run_dir / "cli-process") in " ".join(cli)
+    assert cli[cli.index("--python") + 1] == "3.12"
 
 
 def test_run_stages_sets_nats_log_dir(tmp_path: Path) -> None:

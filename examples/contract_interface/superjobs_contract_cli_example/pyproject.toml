@@ -1,0 +1,25 @@
+[project]
+name = "superjobs-contract-cli-example"
+version = "0.0.1"
+description = "Installed contract-interface CLI application (issue #42)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "superjobs[cli]>=0.1.0",
+    "superjobs-contract-example>=0.0.1",
+]
+
+[project.scripts]
+superjobs-contract-cli = "superjobs_contract_cli_example.main:main"
+
+[build-system]
+requires = ["uv_build>=0.11.21,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+superjobs = { path = "../../..", editable = true }
+superjobs-contract-example = { path = "../superjobs_contract_example", editable = true }
+
+[tool.uv.build-backend]
+module-name = "superjobs_contract_cli_example"
+module-root = "src"

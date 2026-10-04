@@ -64,6 +64,28 @@ def _remote_cli() -> JobCLI:
     return cli
 
 
+def test_missing_cli_extra_reports_install_instruction() -> None:
+    code = """
+import importlib.abc
+import sys
+class BlockTyper(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'typer':
+            raise ModuleNotFoundError('No module named typer', name='typer')
+sys.meta_path.insert(0, BlockTyper())
+import superjobs
+try:
+    import superjobs.cli
+except ImportError as error:
+    assert "optional 'cli' extra" in str(error), error
+    assert "superjobs[cli]" in str(error), error
+else:
+    raise AssertionError('CLI extra unexpectedly available')
+"""
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
 def test_core_import_does_not_load_cli_machinery() -> None:
     script = (
         "import superjobs, sys; "

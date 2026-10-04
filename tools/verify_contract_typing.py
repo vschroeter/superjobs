@@ -32,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_ROOT = REPO_ROOT / "examples" / "contract_interface"
 TYPING_ROOT = EXAMPLE_ROOT / "typing"
 CONTRACT_SRC = EXAMPLE_ROOT / "superjobs_contract_example"
+CLI_EXAMPLE_SRC = EXAMPLE_ROOT / "superjobs_contract_cli_example"
 LIBRARY_SRC = REPO_ROOT / "src"
 ORIGIN_PROBE = Path(__file__).resolve().parent / "wheel_origin_probe.py"
 
@@ -57,7 +58,11 @@ TYPING_SUITES: tuple[TypingSuite, ...] = (
     TypingSuite("producer_negative", "producer_negative", ("check_types.py",), True),
     TypingSuite("strict_payload_positive", "strict_payload_positive", ("check_types.py",), False),
     TypingSuite("strict_payload_negative", "strict_payload_negative", ("check_types.py",), True),
-    TypingSuite("cli_positive", "cli_positive", ("check_types.py", "cli_registration_example.py"), False),
+    TypingSuite("cli_positive", "cli_positive", (
+        "check_types.py", "cli_registration_example.py", "cli_application.py",
+        "cli_application_main.py", "cli_application_sync.py", "cli_worker_handlers.py",
+        "cli_observe_execution.py",
+    ), False),
     TypingSuite("cli_negative", "cli_negative", ("check_types.py",), True),
 )
 
@@ -70,6 +75,7 @@ RUNTIME_TEST_FILES = (
     REPO_ROOT / "tests" / "test_cli_local_run.py",
     REPO_ROOT / "tests" / "test_cli_remote_submit.py",
     REPO_ROOT / "tests" / "test_cli_remote_contracts.py",
+    REPO_ROOT / "tests" / "test_contract_cli_example_public.py",
 )
 
 
@@ -334,7 +340,11 @@ def write_pyrightconfig(
         "autoSearchPaths": False,
     }
     if mode == "source":
-        config["extraPaths"] = [str(LIBRARY_SRC), str(CONTRACT_SRC / "src")]
+        config["extraPaths"] = [
+            str(LIBRARY_SRC),
+            str(CONTRACT_SRC / "src"),
+            str(CLI_EXAMPLE_SRC / "src"),
+        ]
     target.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
 
@@ -347,6 +357,13 @@ def copy_suite_tree(suite: TypingSuite, dest: Path) -> None:
         shutil.copy2(EXAMPLE_ROOT / "worker_handlers.py", dest / "worker_handlers.py")
     if suite.name == "cli_positive":
         shutil.copy2(REPO_ROOT / "examples/cli_registration/main.py", dest / "cli_registration_example.py")
+        for source, name in (
+            (CLI_EXAMPLE_SRC / "src/superjobs_contract_cli_example/main.py", "cli_application_main.py"),
+            (CLI_EXAMPLE_SRC / "src/superjobs_contract_cli_example/sync.py", "cli_application_sync.py"),
+            (EXAMPLE_ROOT / "superjobs_contract_worker_example/src/superjobs_contract_worker_example/handlers.py", "cli_worker_handlers.py"),
+            (REPO_ROOT / "tools/cli_process_support/observe_execution.py", "cli_observe_execution.py"),
+        ):
+            shutil.copy2(source, dest / name)
 
 
 def strip_contract_sources(pyproject: Path) -> None:
@@ -390,6 +407,25 @@ def build_wheels(work_dir: Path) -> tuple[Path, Path]:
     return library, contract
 
 
+def build_cli_example_wheel(work_dir: Path) -> Path:
+    dist = work_dir / "dist"
+    dist.mkdir(parents=True, exist_ok=True)
+    cli_build = work_dir / "cli_pkg"
+    shutil.copytree(
+        CLI_EXAMPLE_SRC,
+        cli_build,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns(".venv", "__pycache__"),
+    )
+    strip_contract_sources(cli_build / "pyproject.toml")
+    run_cmd(["uv", "build", "--project", str(cli_build), "--out-dir", str(dist)])
+    wheels = sorted(dist.glob("*.whl"))
+    cli_wheel = next((w for w in wheels if w.name.startswith("superjobs_contract_cli")), None)
+    if cli_wheel is None:
+        raise VerificationError(f"Could not find CLI example wheel in {dist}: {[w.name for w in wheels]}")
+    return cli_wheel
+
+
 def venv_python(venv_dir: Path) -> Path:
     if sys.platform == "win32":
         return venv_dir / "Scripts" / "python.exe"
@@ -416,6 +452,7 @@ def create_wheel_venv(
     library: Path,
     contract: Path,
     *,
+    cli_example: Path | None = None,
     name: str | None = None,
 ) -> Path:
     venv_dir = work_dir / (name or f"venv-py{python.replace('.', '')}")
@@ -423,21 +460,20 @@ def create_wheel_venv(
         shutil.rmtree(venv_dir)
     run_cmd(["uv", "venv", "--python", python, str(venv_dir)])
     py = venv_python(venv_dir)
-    runtime_version = assert_final_runtime_python(py)
-    run_cmd(
-        [
-            "uv",
-            "pip",
-            "install",
-            "--python",
-            str(py),
-            f"{library}[cli]",
-            str(contract),
-            "pytest>=9.1.1",
-            "pytest-asyncio>=1.4.0",
-        ],
-        env={"PYTHONNOUSERSITE": "1"},
-    )
+    assert_final_runtime_python(py)
+    install = [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        str(py),
+        f"{library}[cli]",
+        str(contract),
+    ]
+    if cli_example is not None:
+        install.append(str(cli_example))
+    install.extend(["pytest>=9.1.1", "pytest-asyncio>=1.4.0"])
+    run_cmd(install, env={"PYTHONNOUSERSITE": "1"})
     return venv_dir
 
 
@@ -776,11 +812,13 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.mode in ("wheel", "both"):
             library, contract = build_wheels(work_dir)
+            cli_example = build_cli_example_wheel(work_dir)
             shared_typing_venv = create_wheel_venv(
                 work_dir,
                 STATIC_PYTHON_VERSION,
                 library,
                 contract,
+                cli_example=cli_example,
                 name="venv-typing-shared",
             )
 
@@ -804,7 +842,13 @@ def main(argv: list[str] | None = None) -> int:
                 if py_version == STATIC_PYTHON_VERSION:
                     venv_dir = shared_typing_venv
                 else:
-                    venv_dir = create_wheel_venv(work_dir, py_version, library, contract)
+                    venv_dir = create_wheel_venv(
+                        work_dir,
+                        py_version,
+                        library,
+                        contract,
+                        cli_example=cli_example,
+                    )
                 py = venv_python(venv_dir)
                 producer_only = work_dir / f"producer-only-py{py_version.replace('.', '')}"
                 producer_only.mkdir(parents=True, exist_ok=True)

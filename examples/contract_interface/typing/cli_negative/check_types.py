@@ -127,3 +127,15 @@ def invalid_positional_fields_type(cli: JobCLI) -> None:
         handler=handler,
         positional_fields=["bundle_id"],  # expect: reportArgumentType
     )
+
+
+def installed_application_misuse() -> None:
+    from superjobs_contract_cli_example import build_cli
+    from superjobs_contract_example import CLI_GATE_JOB, CliGateRequest, CliLocalProbeResult
+
+    cli = build_cli()
+
+    async def wrong_result(request: CliGateRequest, context: JobContext[None]) -> CliLocalProbeResult:
+        return CliLocalProbeResult(pid=1)
+
+    cli.add("gate-wrong-result", CLI_GATE_JOB, handler=wrong_result)  # expect: reportCallIssue, reportArgumentType

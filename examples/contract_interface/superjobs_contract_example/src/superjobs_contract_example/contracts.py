@@ -77,3 +77,55 @@ HEARTBEAT_JOB = Job(
     result=HeartbeatResult,
     event=None,
 )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CliLocalProbeRequest:
+    note: str
+
+
+@dataclass(frozen=True, slots=True)
+class CliLocalProbeResult:
+    pid: int
+
+
+CLI_LOCAL_PROBE_JOB = Job(
+    "examples.contract.cli.local_probe",
+    version="v1",
+    request=CliLocalProbeRequest,
+    result=CliLocalProbeResult,
+    event=None,
+)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CliGateRequest:
+    gate: str
+
+
+@dataclass(frozen=True, slots=True)
+class CliGateResult:
+    gate: str
+
+
+CLI_GATE_JOB = Job(
+    "examples.contract.cli.gate",
+    version="v1",
+    request=CliGateRequest,
+    result=CliGateResult,
+    event=None,
+)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CliFailRequest:
+    reason: str
+
+
+CLI_FAIL_JOB = Job(
+    "examples.contract.cli.fail",
+    version="v1",
+    request=CliFailRequest,
+    result=None,
+    event=None,
+)

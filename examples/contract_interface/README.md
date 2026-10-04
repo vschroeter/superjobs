@@ -2,6 +2,13 @@
 
 Runnable sketch for shared **contract packages**, producer/worker split, and measured typing guarantees. API and decisions: [docs/api.md](../../docs/api.md), [docs/adr/](../../docs/adr/README.md).
 
+For installed console commands with local `run` and NATS `submit`, see
+[CLI application integration](../../docs/design/cli-application.md). The CLI,
+worker and worker resource packages are built into separate non-editable wheels;
+the CLI environment excludes worker implementation and resource dependencies.
+`tools/verify_cli_process.py` exercises installed commands and a separately
+installed worker on owned NATS, including recovery after producer exit.
+
 ## Dependencies
 
 | Component | Needs |

@@ -1,10 +1,18 @@
 """Shared Job contracts for the contract-interface example."""
 
 from superjobs_contract_example.contracts import (
+    CLI_FAIL_JOB,
+    CLI_GATE_JOB,
+    CLI_LOCAL_PROBE_JOB,
     HEARTBEAT_JOB,
     MANIFEST_NO_EVENTS_JOB,
     MANIFEST_WITH_EVENTS_JOB,
     TELEMETRY_INGEST_JOB,
+    CliFailRequest,
+    CliGateRequest,
+    CliGateResult,
+    CliLocalProbeRequest,
+    CliLocalProbeResult,
     HeartbeatResult,
     ManifestEvent,
     ManifestNoEventsRequest,
@@ -15,10 +23,18 @@ from superjobs_contract_example.contracts import (
 )
 
 __all__ = [
+    "CLI_FAIL_JOB",
+    "CLI_GATE_JOB",
+    "CLI_LOCAL_PROBE_JOB",
     "HEARTBEAT_JOB",
     "MANIFEST_NO_EVENTS_JOB",
     "MANIFEST_WITH_EVENTS_JOB",
     "TELEMETRY_INGEST_JOB",
+    "CliFailRequest",
+    "CliGateRequest",
+    "CliGateResult",
+    "CliLocalProbeRequest",
+    "CliLocalProbeResult",
     "HeartbeatResult",
     "ManifestEvent",
     "ManifestNoEventsRequest",

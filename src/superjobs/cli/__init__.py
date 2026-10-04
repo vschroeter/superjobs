@@ -1,5 +1,15 @@
 """Optional typed CLI registration (install ``superjobs[cli]``)."""
 
+try:
+    import typer as _typer
+except ModuleNotFoundError as error:
+    if error.name != "typer":
+        raise
+    raise ImportError(
+        "SuperJobs CLI requires the optional 'cli' extra. "
+        "Install with: pip install 'superjobs[cli]'"
+    ) from error
+
 from superjobs.cli.app import JobCLI
 from superjobs.cli.runtime_factory import LocalRuntimeFactory, RemoteRuntimeFactory
 from superjobs.cli.field_config import CLIField

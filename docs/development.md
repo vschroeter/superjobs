@@ -52,7 +52,7 @@ python -m pytest -m "not nats and not contract_typing" -q
 
 - **Fast** runs `pytest -m "not nats and not contract_typing"` only. No broker required.
 - **Full** runs fast stages plus integration (contract typing runner, real NATS pytest,
-  cross-program, worker recovery, broker restart, idle outage).
+  cross-program, worker recovery, broker restart, idle outage, installed CLI).
 - **Integration** workflow jobs run heavy stages only. Contract typing uses
   `tools/verify_contract_typing.py` directly; duplicate `pytest -m contract_typing`
   is not part of orchestration.
@@ -101,7 +101,7 @@ at **`04f24f2`** — six fast cells, four integration cells, both aggregates pas
 Stable minors were checked against [Python 3.14.7](https://www.python.org/downloads/release/python-3147/)
 and the [2026-08 stable release blog post](https://blog.python.org/2026/08/python-3147-31315/).
 
-## `dev_check full` stages (seven)
+## `dev_check full` stages (eight)
 
 1. Deterministic pytest (`not nats and not contract_typing`)
 2. Contract typing (`tools/verify_contract_typing.py`)
@@ -110,6 +110,7 @@ and the [2026-08 stable release blog post](https://blog.python.org/2026/08/pytho
 5. Worker crash recovery (`tools/verify_worker_recovery.py`)
 6. Broker persistent-store restart (`tools/verify_broker_restart.py`)
 7. Idle outage reconnect (`tools/verify_idle_outage.py`)
+8. Installed contract-interface CLI (`tools/verify_cli_process.py`)
 
 Fast mode runs stage 1 only. Integration workflow jobs use a **15 minute** timeout;
 orchestrator integration budget **855 s** (job cap minus **45 s** upload reserve).
@@ -128,7 +129,7 @@ On failure or cancellation, CI uploads `dist/verification/dev-check/**` includin
 - Per-stage `stdout.txt`, `stderr.txt`, and `stage.json`
 - NATS JUnit `nats-junit.xml` under the run directory
 - Tool runner artifacts under `contract-typing/`, `cross-program/`,
-  `worker-recovery/`, `broker-restart/`, and `idle-outage/`
+  `worker-recovery/`, `broker-restart/`, `idle-outage/`, and `cli-process/`
 - NATS broker logs under `nats-logs/` when pytest stages run
 
 Subprocess stages use descendant cleanup (`taskkill /T` on Windows, depth-first

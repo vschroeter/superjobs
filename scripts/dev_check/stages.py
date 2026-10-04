@@ -130,6 +130,19 @@ def idle_outage_argv(repo_root: Path, python_version: str, run_dir: Path) -> lis
     )
 
 
+def cli_process_argv(repo_root: Path, python_version: str, run_dir: Path) -> list[str]:
+    artifact = run_dir / "cli-process"
+    artifact.mkdir(parents=True, exist_ok=True)
+    return _python_tool_argv(
+        repo_root,
+        "tools/verify_cli_process.py",
+        "--python",
+        python_version,
+        "--artifact-dir",
+        str(artifact),
+    )
+
+
 FAST_STAGES: tuple[StageSpec, ...] = (
     StageSpec(
         name="deterministic-pytest",
@@ -184,6 +197,13 @@ INTEGRATION_STAGES: tuple[StageSpec, ...] = (
         timeout_seconds=_TOOL_STAGE_TIMEOUT,
         build_argv=idle_outage_argv,
         description="Idle installed producer/worker survive a short broker outage.",
+    ),
+    StageSpec(
+        name="cli-process",
+        kind="tool",
+        timeout_seconds=_TOOL_STAGE_TIMEOUT,
+        build_argv=cli_process_argv,
+        description="Installed contract-interface CLI local run and NATS submit verification.",
     ),
 )
 

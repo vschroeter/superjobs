@@ -174,3 +174,9 @@ def _typed_runtime_factories(cli: JobCLI) -> None:
         remote_runtime_factory=remote_factory,
     )
     assert_type(typed, JobCLI)
+
+
+def _contract_cli_example_registration() -> None:
+    from superjobs_contract_cli_example import build_cli as example_build
+
+    assert_type(example_build(), JobCLI)

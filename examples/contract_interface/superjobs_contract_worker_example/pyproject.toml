@@ -1,0 +1,28 @@
+[project]
+name = "superjobs-contract-worker-example"
+version = "0.0.1"
+description = "Worker implementation package for the contract-interface CLI example"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "superjobs>=0.1.0",
+    "superjobs-contract-example>=0.0.1",
+    "superjobs-contract-worker-resources>=0.0.1",
+    "faststream[nats]>=0.7.4",
+]
+
+[project.scripts]
+superjobs-contract-worker = "superjobs_contract_worker_example.main:main"
+
+[build-system]
+requires = ["uv_build>=0.11.21,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+superjobs = { path = "../../..", editable = true }
+superjobs-contract-example = { path = "../superjobs_contract_example", editable = true }
+superjobs-contract-worker-resources = { path = "../superjobs_contract_worker_resources", editable = true }
+
+[tool.uv.build-backend]
+module-name = "superjobs_contract_worker_example"
+module-root = "src"

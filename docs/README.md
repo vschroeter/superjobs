@@ -10,6 +10,7 @@ Pre-alpha typed jobs over NATS JetStream. Start with the repository
 | [development.md](development.md) | Canonical `dev_check`, CI matrix, runner index |
 | [design/cli-registration.md](design/cli-registration.md) | Optional Typer registration shell and execution limitations |
 | [design/cli-remote.md](design/cli-remote.md) | Owned NATS submission, result waiting, execution references and cleanup |
+| [design/cli-application.md](design/cli-application.md) | Installed application commands, isolated CLI/worker proof and reference recovery |
 | [verification.md](verification.md) | Dated measured results and limitations |
 | [adr/](adr/README.md) | Accepted decisions with issue links |
 
