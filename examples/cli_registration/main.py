@@ -1,4 +1,4 @@
-"""JobCLI registration demo with JSON and field input (issue #39; execution unavailable)."""
+"""JobCLI registration demo with JSON, field input, and local run (issues #39–#40)."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ MOOD_JOB = Job(
 
 @asynccontextmanager
 async def local_runtime() -> AsyncIterator[SuperJobs]:
-    """Application-owned SuperJobs lifetime for future local ``run`` execution."""
+    """Application-owned SuperJobs lifetime for local ``run`` execution."""
     jobs = SuperJobs(transport=InMemoryTransport())
     async with jobs:
         yield jobs

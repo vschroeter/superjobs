@@ -30,18 +30,17 @@ Application code owns runtime lifetime via async context-manager factories:
 
 | Factory | Purpose |
 | --- | --- |
-| `local_runtime_factory` | Yields `SuperJobs` for in-process `run` (future slice) |
+| `local_runtime_factory` | Optional; yields `SuperJobs` for in-process `run` (built-in in-memory factory when omitted) |
 | `remote_runtime_factory` | Yields `SuperJobs` for NATS `submit` (future slice) |
 
-Factories must not run for `--help` or when another command is selected. This slice
-does not invoke them. Lazy `handler_factory` callables are likewise deferred until
-local execution lands.
+Factories must not run for `--help` or when a command is not selected.
+Lazy `handler_factory` callables run only when a local `run` command is selected.
 The application creates and closes resources inside each context manager; the
 CLI will enter the selected manager and exit it on every outcome. Factories
 must return fresh invocation resources, rather than reusing a running worker
 runtime. Handler factories take no arguments and can close over application
 configuration. Their returned handler association/signature must be validated
-when resolved by the future local executor. This slice checks the factory's
+when resolved by the local executor. Registration checks the factory's
 callability and static result type without loading it.
 
 ### Typer composition
@@ -76,7 +75,7 @@ rejects calls from a thread that already has a running asyncio event loop.
 
 | Stream | Content |
 | --- | --- |
-| stdout | One JSON final result or one accepted execution-reference object (future slices) |
+| stdout | One JSON final result; accepted execution references are planned in #41 |
 | stderr | Diagnostics and observations |
 
 | Code | Meaning |
@@ -101,7 +100,7 @@ At `add()` time:
 
 Issue #39 adds mutually exclusive `--json` / `--input`, generated scalar field
 options, optional ``positional_fields`` / ``field_options`` customization, and shared
-typed request preparation before the execution-unavailable stub.
+typed request preparation shared by local execution and the remote submission stub.
 
 Field options are all-or-nothing per command: one unsupported input schema
 property (nested, list, nullable or union) forces JSON-only input. Serialization-only
@@ -112,16 +111,25 @@ shape.
 
 ## Execution status
 
-`run` and `submit` intentionally report that execution is unavailable, write a
-diagnostic to stderr, and exit without successful stdout. No handler or runtime
-factory is called. Do not rely on this document for NATS or in-process execution
-behavior until issues #40–#42 land.
+`run` executes the selected handler in-process through an application-owned
+`local_runtime_factory` and `InMemoryTransport` (issue #40). Observations stream
+to stderr as JSON lines; stdout carries one adapter-serialized final result JSON
+value (`null` when the Job has no result). Local run uses one attempt, requests
+cooperative cancellation on interrupt, and applies a cancellation grace period and
+cleanup budget defined by `LOCAL_RUN_SHUTDOWN_TIMEOUT_SECONDS` (exported from
+`superjobs.cli`). See [CLI local execution](cli-local.md) for the deadlines and
+limits of in-process Python cancellation. Handler effects are not rolled back.
+
+`submit` still reports unavailable remote execution until issue #41 lands.
+
+Local execution semantics, shutdown bounds and validation rules are documented
+in [cli-local.md](cli-local.md).
 
 ## Example
 
 See [examples/cli_registration](../../examples/cli_registration/README.md).
 
-## Verification on 2026-10-03
+## Historical registration-slice verification on 2026-10-03
 
 Implemented on `feature/cli`; no package publication or hosted CI run
 is implied. Cursor Composer 2.5 produced the initial implementation and one

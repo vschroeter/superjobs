@@ -67,6 +67,7 @@ RUNTIME_TEST_FILES = (
     REPO_ROOT / "tests" / "test_cli_public.py",
     REPO_ROOT / "tests" / "test_cli_input.py",
     REPO_ROOT / "tests" / "test_cli_input_contracts.py",
+    REPO_ROOT / "tests" / "test_cli_local_run.py",
 )
 
 
