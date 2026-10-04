@@ -1,4 +1,4 @@
-# CLI application integration
+# Installed CLI examples and process verification
 
 Issue [#42](https://github.com/vschroeter/superjobs/issues/42) packages the
 contract-interface example as separate installable applications: a CLI producer
@@ -8,6 +8,11 @@ contract, and CLI packages only; worker modules are not importable there.
 The worker additionally requires `superjobs-contract-worker-resources`, an
 example-only dependency used at startup and absent from the CLI installation.
 These packages are repository examples; the instructions build local wheels.
+
+Registration, input rules, local/remote semantics, exit codes, and timeouts are
+documented in the canonical guide [cli.md](../cli.md). This page covers
+**installed** wheel layout, manual invocation, reference recovery, and measured
+process verification.
 
 ## Installation
 
@@ -80,7 +85,9 @@ New-Item -ItemType Directory -Force $env:SUPERJOBS_CLI_STATE_DIR | Out-Null
 & "$env:TEMP\superjobs-cli-worker\.venv\Scripts\superjobs-contract-worker.exe"
 ```
 
-Use a fresh state directory for each worker invocation. In the CLI terminal:
+Use a fresh state directory for each worker invocation. Wait for the worker's
+`worker ready` message or its `worker_ready.json` marker before commands that
+wait for results. In the CLI terminal:
 
 ```powershell
 $env:SUPERJOBS_NATS_URL = 'nats://localhost:4222'
@@ -97,6 +104,15 @@ On Linux, the console commands are `.../.venv/bin/superjobs-contract-cli` and
 The gate/probe/failure commands in this example exist for verification. Normal
 application code owns its own startup, handlers and worker shutdown policy.
 
+To stop this example worker cooperatively, write its stop marker from another
+terminal, using the same state directory and run ID as the worker:
+
+```powershell
+'{"run_id":"manual-example"}' | Set-Content -Encoding ascii "$env:TEMP\superjobs-worker-manual\worker_stop.json"
+```
+
+On Linux, write the same JSON to `worker_stop.json` in the chosen state directory.
+
 ## Registration and public API
 
 Applications expose `build_cli() -> JobCLI` and a console entry point
@@ -111,42 +127,17 @@ Applications expose `build_cli() -> JobCLI` and a console entry point
 | `gate-local` / `gate-remote` | `examples.contract.cli.gate` | file-gated local handler | worker gate |
 | `fail-local` / `fail-remote` | `examples.contract.cli.fail` | raises `RuntimeError` | worker raises |
 
-`bundle` demonstrates a **positional** contract field (`bundle_id`). Field
-options and JSON/file/stdin input follow [CLI input](cli-input.md).
+`bundle` demonstrates a **positional** contract field (`bundle_id`). See [cli.md](../cli.md)
+for input forms, factories, and lifecycle rules.
 
 Runtime factories in `superjobs_contract_cli_example.main`:
 
 - `local_runtime()` — `SuperJobs(transport=InMemoryTransport())`
 - `remote_runtime()` — `SuperJobs(broker=NatsBroker(SUPERJOBS_NATS_URL, ...))`
 
-Startup dependencies (NATS client, env) live inside these factories; the CLI
-enters the selected factory per command.
-Help and invalid input do not enter them. `submit` does not resolve local handler
-factories. A real application can register `handler_factory=` to import local
-implementation dependencies only when `run` selects that command. It can also
-use `remote_only=True` when the local implementation is unavailable; `run` then
-exits `2`. Factories must yield fresh owned runtimes and release their resources
-in `finally`; the CLI registers the selected local handler and starts the runtime.
+## Reference recovery (installed example)
 
-## Modes
-
-| Mode | Broker | Handler location | stdout | stderr |
-| --- | --- | --- | --- | --- |
-| `run` | none (in-memory) | CLI process | final result JSON | observations + diagnostics |
-| `submit` (no `--wait`) | NATS | worker process | execution reference JSON | diagnostics |
-| `submit --wait` | NATS | worker process | final result JSON | observations + diagnostics |
-
-Exit codes match [CLI registration](cli-registration.md): `0` success, `1`
-runtime/transport/terminal failure, `2` usage/validation, `130` CLI interrupt.
-Invalid input is rejected **before** runtime startup (exit `2`) and must not
-create Job executions.
-
-Remote submission preserves execution references on timeout, transport failure
-after acceptance, and CLI interrupt; it does **not** cancel accepted work.
-Recovery uses `job_id` from the reference with a fresh client (`get` +
-`outcome`), as exercised by the installed-process verifier.
-
-Retain all three fields of the reference. Resolve its exact contract name and
+Retain all three fields of the execution reference. Resolve its exact contract name and
 version from the shared contract package before calling `get`; do not treat an
 absent version as “latest.” For an accepted `bundle` reference:
 
@@ -171,38 +162,9 @@ async def recover(reference_json: str) -> bool:
             raise RuntimeError(f"execution did not succeed: {outcome!r}")
 ```
 
-Recovery depends on the broker store and configured retention. Observation history
-and durable final results have distinct retention and worker-loss semantics;
-missing observations do not erase a retained successful result. If submission
+Recovery depends on broker store and configured retention. If submission
 acceptance was unconfirmed, absence of a printed reference does not prove rejection.
 Do not automatically repeat a submission whose acceptance is unknown.
-
-Retry, cancellation, and lifetime semantics follow the core library; the CLI
-does not add local retry configuration or remote cancellation.
-Local `run` uses one attempt and in-memory state with no durable recovery.
-Remote submissions use the contract's existing pool and default retry policy;
-handlers must tolerate at-least-once attempts. Wait timeout controls only the
-client wait. Local interruption requests cooperative cancellation; remote CLI
-interruption disconnects the observer and leaves accepted work uncancelled.
-
-## Conservative supported schemas
-
-Flat object schemas with strings, integers, finite floats, booleans and enums
-with homogeneous scalar values generate Typer options. Any nested, union, list,
-nullable or unsupported property makes the whole command JSON-only. Custom
-adapters without a supported schema also use `--json` or `--input` (including
-`-` for stdin).
-Canonical JSON field names use contract property names; CLI options replace
-underscores with hyphens.
-Aliases are not alternate input names. Omitted values stay omitted until strict
-adapter validation applies defaults; supplied false and default-equal values
-remain supplied. JSON/file/stdin and field/positional inputs cannot be mixed.
-
-Default remote wait bound: `DEFAULT_CLI_WAIT_TIMEOUT_SECONDS` (300s). Local and
-remote cooperative shutdown budgets: 30s each (see `superjobs.cli` exports).
-Local interruption has a 30s cooperative grace period followed by a separate
-30s cleanup budget. These bounds require cancellation-aware application code;
-they request cancellation and cannot forcibly stop arbitrary Python threads.
 
 ## Verification
 
@@ -218,47 +180,16 @@ logs, origin probes). Each invocation uses a fresh `run-<uuid>` evidence directo
 to prevent marker reuse. Work directories use OS temp prefixes
 `superjobs-cli-process-*`.
 
-### Measured verification
-
-Independent local verification on 2026-10-04 used the CI-style isolated command
-from [development.md](../development.md), selecting `integration`, the indicated
-Python minor, and `--artifact-dir dist/issue42/final-matrix-<platform>-py<minor>`.
-Linux ran under WSL; these results are not a hosted GitHub Actions run.
-
-| Check | Result |
-| --- | --- |
-| Windows, CPython 3.12 | Seven integration stages passed; 18 CLI scenarios; 192.3 s total, 59.4 s CLI stage |
-| Windows, CPython 3.14 | Seven integration stages passed; 18 CLI scenarios; 194.4 s total, 59.9 s CLI stage |
-| Linux, CPython 3.12 | Seven integration stages passed; 18 CLI scenarios; 155.8 s total, 48.1 s CLI stage |
-| Linux, CPython 3.14 | Seven integration stages passed; 18 CLI scenarios; 156.3 s total, 48.4 s CLI stage |
-| Source and wheel typing, all four cells | Positive consumers passed; all negative diagnostics matched by file/line/rule, including 27 CLI diagnostics |
-| Installed runtime tests, all four cells | Package origins passed; Windows 247 tests passed, Linux 248 tests passed |
-| Real NATS pytest, all four cells | 20 tests passed per cell, no skips |
-| Windows fast gate, CPython 3.13 | 719 passed, 2 platform skips, 25 integration tests deselected; 97.6 s gate |
-| Verifier unit tests on Windows | 16 passed, including actual Ctrl+C delivery and child-tree cleanup |
-| Deliberately missing `NATS_EXECUTABLE` | Verifier exited 1 and retained the setup error; no skip |
-
-The remote observation scenario checks generated options, JSON, file and stdin
-inputs individually; the positional `bundle` command is checked separately.
-Each matrix artifact directory retains `run-summary.json`, stage stdout/stderr,
-origin probes and detailed CLI scenario evidence. The fast-gate evidence is in
-`dist/issue42/final-windows-fast-console/`; the missing-infrastructure diagnostic
-is in `dist/issue42/broken-nats-control.log`.
-
-Full `dev_check integration` on Linux and Windows CI remains the authoritative
-matrix gate alongside the existing **855 s** orchestrator budget / **900 s**
-workflow cap.
+Measured **#42** matrix (18 scenarios × four platform/interpreter cells, seven
+integration stages, 20 real-NATS pytest cases per cell): [verification.md](../verification.md#42--installed-application-matrix-2026-10-04-current).
 
 ### Limitations (measured, not hidden)
 
 - Windows CLI interrupt uses a hidden `CREATE_NEW_CONSOLE` launch and a helper
   that attaches to the target console and delivers `CTRL_C_EVENT`; Unix uses
   `SIGINT`. Both require cooperative handlers for bounded cleanup (exit `130`).
-  A Windows verification supervisor first restores normal Ctrl+C inheritance
-  when launched by `dev_check`'s process group, then invokes the installed
-  console executable. It stays alive until that command completes cleanup.
 - Python cannot hard-terminate cancellation-resistant in-process work; the CLI
-  diagnoses and waits within documented budgets.
+  requests cancellation, diagnoses resistant work, and waits for it ([cli.md](../cli.md)).
 - This documentation does **not** claim PyPI publication, contract-manifest
   enforcement on the wire, or durable local recovery after CLI exit.
 - Real NATS scenarios require the owned pinned NATS harness; missing
@@ -266,8 +197,5 @@ workflow cap.
 
 ## Related documents
 
-- [CLI registration](cli-registration.md)
-- [CLI input](cli-input.md)
-- [CLI local execution](cli-local.md)
-- [CLI remote submission](cli-remote.md)
+- [CLI user guide](../cli.md)
 - [Contract-interface example](../../examples/contract_interface/README.md)

@@ -1,15 +1,23 @@
 # Verification summary
 
-Dated measured results for branch **`api_design`**. Commands and matrix:
-[development.md](development.md). This file records **what was run**, not product
-SLOs.
+Dated measured results. Commands and matrix: [development.md](development.md).
+This file records **what was run**, not product SLOs.
 
-## Required CI at `04f24f2`
+## Gate shape: historical vs current
+
+| Era | Branch / revision | `dev_check full` | `dev_check integration` | Hosted CI |
+| --- | --- | --- | --- | --- |
+| **Historical** | `api_design` @ `04f24f2` | **Seven** stages (no CLI process proof) | **Six** stages | [Run 37127882378](https://github.com/vschroeter/superjobs/actions/runs/37127882378): fast + integration aggregates passed |
+| **Current (CLI)** | `feature/cli` @ `fd9dd0a` | **Eight** stages (adds installed CLI) | **Seven** stages | No CLI PR / hosted run; workflow push trigger remains `main` / `api_design` only |
+
+Counts in older sections below are **historical** unless labeled current CLI.
+
+## Required CI at `04f24f2` (historical)
 
 | Check | Result |
 | --- | --- |
 | GitHub Actions `checks / fast` + `checks / integration` | **Passed** — [run 37127882378](https://github.com/vschroeter/superjobs/actions/runs/37127882378): 6 fast matrix cells (Windows/Linux × py312/313/314), 4 integration cells (Windows/Linux × py312/314), both aggregates |
-| `dev_check full` seven stages | Covered by **fast** matrix jobs (stage 1) **plus** **integration** matrix jobs (stages 2–7); `dev_check integration` alone runs **six** stages |
+| `dev_check full` seven stages | Covered by **fast** matrix jobs (stage 1) **plus** **integration** matrix jobs (stages 2–7); `dev_check integration` alone ran **six** stages (no CLI) |
 
 Library changes between `af5fcec` and `04f24f2` did not alter `src/`; documentation
 and local tooling edits may differ on your machine.
@@ -107,3 +115,53 @@ bounded reliability repetition ([#22](https://github.com/vschroeter/superjobs/is
 manual performance baselines ([#23](https://github.com/vschroeter/superjobs/issues/23)),
 and exhaustive crash-window matrices remain outside required PR closure unless
 explicitly promoted in a future decision.
+
+## CLI slices on `feature/cli` (issues #38–#42, closed)
+
+Local verification only unless noted. Issues [#38](https://github.com/vschroeter/superjobs/issues/38)–[#42](https://github.com/vschroeter/superjobs/issues/42) are **closed**; parent [#37](https://github.com/vschroeter/superjobs/issues/37) remains open. Implementation landed at `fd9dd0a`. User-facing behavior: [cli.md](cli.md). Installed proof: [design/cli-application.md](design/cli-application.md).
+
+### #38 — registration shell (2026-10-03)
+
+Typer `JobCLI`, `run`/`submit` groups, mount snapshots, exit codes, 19 CLI negative
+diagnostics at `add()` (later slices add more). Evidence: `dist/issue38/` (gitignored).
+Representative: `dev_check fast` 523/522 passed (Win/Linux py312/314); 67 installed
+public runtime tests per cell; Typer minimum raised to 0.27.2 after 0.15.1 probe failures.
+
+### #39 — request input (2026-10-03)
+
+`--json` / `--input`, generated scalar options, `CLIField` / positionals, JSON-only
+fallback. Evidence: `dist/issue39/`. Representative: `dev_check fast` 616/615 passed;
+160 installed public runtime tests per cell; 23 CLI misuse diagnostics; 136 focused CLI tests.
+
+### #40 — local `run` (2026-10-04)
+
+In-memory isolated runtime, interrupt/shutdown bounds (`LOCAL_RUN_SHUTDOWN_TIMEOUT_SECONDS` 30s grace + 30s cleanup). Evidence: `dist/issue40/final-*`. Representative: full deterministic gate 664 passed (py312/313/314); 184–185 focused CLI tests; 208–209 installed public runtime tests per platform/interpreter.
+
+### #41 — remote `submit` (2026-10-04)
+
+Owned NATS producer, `--wait` / default 300s client bound, 2s observation drain cap,
+30s startup/submission/teardown phase bounds. Evidence: `dist/issue41/final-*`.
+Representative (Windows): deterministic py313 700 passed; 45 remote suite tests
+(8 real NATS); 20 owned-NATS tests; 245 installed public runtime tests per py312/314.
+A full deterministic gate run preceded the final broker **startup rollback**
+safeguard; focused remote tests and the installed CLI matrix also cover teardown
+when the yielded runtime never reached `started`.
+
+### #42 — installed application matrix (2026-10-04, current)
+
+Independent local matrix on Windows and Linux (WSL), Python 3.12 and 3.14, using
+`dev_check integration` with `tools/verify_cli_process.py` (18 scenarios per cell).
+Evidence: `dist/issue42/final-matrix-*`, fast console `dist/issue42/final-windows-fast-console/`.
+
+| Check | Windows py312 | Windows py314 | Linux py312 | Linux py314 |
+| --- | --- | --- | --- | --- |
+| Integration stages | 7 passed | 7 passed | 7 passed | 7 passed |
+| CLI scenarios | 18 | 18 | 18 | 18 |
+| Installed public runtime | 247 passed | 247 passed | 248 passed | 248 passed |
+| Required real NATS pytest | 20 passed | 20 passed | 20 passed | 20 passed |
+| Source/wheel typing | **zero errors** on positives; matching negatives incl. **27** CLI diagnostics | same | same | same |
+
+Additional recorded checks (not rerun for documentation): Windows py313 fast gate
+**719 passed**, 2 platform skips; missing `NATS_EXECUTABLE` control exits 1; verifier
+unit tests 16 passed on Windows. CLI negative typing suite totals **27** diagnostics
+on current `feature/cli`.

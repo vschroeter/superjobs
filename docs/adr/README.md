@@ -1,6 +1,6 @@
 # Architecture decision records
 
-Short, **accepted** decisions for SuperJobs on **`api_design`**. Implementation
+Short, **accepted** decisions for SuperJobs. Implementation
 status and measured proofs are separated in [api.md](../api.md) and
 [verification.md](../verification.md).
 

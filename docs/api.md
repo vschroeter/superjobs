@@ -1,14 +1,16 @@
 # SuperJobs public API
 
-Reference branch: **`api_design`** at **`04f24f2`**. Domain language:
+Current public API reference for the SuperJobs library. Domain language:
 [CONTEXT.md](../CONTEXT.md). Architectural decisions: [adr/](adr/README.md).
-Runnable contracts: [examples/contract_interface/](../examples/contract_interface/).
+Optional application CLI: [cli.md](cli.md). Runnable contracts:
+[examples/contract_interface/](../examples/contract_interface/).
 
 ## Implemented vs selected / not implemented
 
 | Area | Status |
 | --- | --- |
 | Shared contract packages, handler registration, async submit/observe | **Implemented** |
+| Optional Typer CLI (`JobCLI`, local `run`, remote `submit`) | **Implemented** — [cli.md](cli.md) |
 | `SubmitOptions`, keyword request construction (`RequestJob`), strict payload validation | **Implemented** |
 | `JobOutcome` narrowing, typed `JobContext` event parameter | **Implemented** |
 | Pyright **1.1.414**, `basic`, static target **3.12** on public consumer fixtures | **Measured guarantee** (not strict/mypy proof) |

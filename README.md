@@ -3,13 +3,14 @@
 **Pre-alpha.** Requires **Python 3.12+**.
 
 SuperJobs provides typed, durable background-job executions over NATS JetStream.
-Producers and workers are separate processes; each needs a **running JetStream-enabled
-NATS server** reachable from both programs (not bundled with the library).
-Domain terms live in [CONTEXT.md](CONTEXT.md). API behavior, typing limits,
-developer checks, and measured verification are documented under
-[docs/](docs/README.md).
+NATS-backed producers and workers are **separate programs**; each needs a
+**running JetStream-enabled NATS server** reachable from both (not bundled with
+the library). In-memory transport, deterministic tests, and CLI **`run`** mode do
+**not** require a broker. Domain terms live in [CONTEXT.md](CONTEXT.md). API
+behavior, typing limits, developer checks, and measured verification are
+documented under [docs/](docs/README.md).
 
-Producers and workers are **separate programs**. Each process owns its own
+Each NATS-backed process owns its own
 `SuperJobs` runtime and broker connection. Both import a shared contract module
 (for example `my_contracts.py` or an installable contract package) with job
 constants and payload types; workers register handlers against those constants
@@ -158,6 +159,106 @@ from superjobs import InMemoryTransport, SuperJobs
 
 jobs = SuperJobs(transport=InMemoryTransport())
 ```
+
+## 4. CLI (optional)
+
+Install the optional CLI extra from a **repository checkout** (not PyPI):
+
+```bash
+pip install -e ".[cli]"
+```
+
+Applications register contract Jobs on `JobCLI`, expose their own console entry
+point (for example `myapp = "myapp.cli:main"`), and own NATS or in-memory runtime
+factories. The library does not ship a global `superjobs` executable.
+
+| Command | Needs broker | Worker for execution |
+| --- | --- | --- |
+| `myapp run <command> …` | no | no (handler runs in the CLI process) |
+| `myapp submit <command> …` | yes | yes when work must run (acceptance can succeed before a worker is up; queued work can outlive the CLI) |
+| `myapp submit … --wait` | yes | yes (waits for final result; default 300 s client bound) |
+
+`myapp` is **your** installed console script name (`[project.scripts]` → the same
+`main()` below), not a library-provided executable. To try the snippet without
+packaging, save section 1 as `my_contracts.py`, save the registration block as
+`myapp_cli.py` beside it, and invoke `python myapp_cli.py …`.
+
+Request input: flat Jobs with only supported scalar fields may use generated
+options; **positionals require explicit** `positional_fields` at registration.
+Otherwise use `--json`, `--input path`, or `--input -` (see
+[docs/cli.md](docs/cli.md)). stdout
+carries one JSON result or execution reference; stderr carries observations and
+diagnostics. Exit `0` success, `1` runtime/transport failure, `2` usage,
+`130` interrupt. Remote wait timeout or CLI interrupt **does not cancel**
+accepted executions.
+
+```python
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from faststream.nats import NatsBroker
+
+from superjobs import JobContext, SuperJobs
+from superjobs.cli import JobCLI
+
+from my_contracts import (
+    MANIFEST_JOB,
+    ManifestEvent,
+    ManifestRequest,
+    ManifestResult,
+)
+
+
+@asynccontextmanager
+async def remote_runtime() -> AsyncIterator[SuperJobs]:
+    jobs = SuperJobs(broker=NatsBroker("nats://localhost:4222"))
+    async with jobs:
+        yield jobs
+
+
+def build_cli() -> JobCLI:
+    cli = JobCLI(remote_runtime_factory=remote_runtime)
+
+    async def manifest_local(
+        request: ManifestRequest,
+        context: JobContext[ManifestEvent],
+    ) -> ManifestResult:
+        await context.emit(ManifestEvent(stage="validated"))
+        return ManifestResult(revision=request.device_id)
+
+    cli.add(
+        "manifest",
+        MANIFEST_JOB,
+        handler=manifest_local,
+        positional_fields=("device_id",),
+    )
+
+    cli.add("manifest-remote", MANIFEST_JOB, remote_only=True)
+    return cli
+
+
+def main() -> int:
+    return build_cli().main()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+Example invocations (direct script; replace with `myapp` after install):
+
+```bash
+python myapp_cli.py run manifest sensor-17
+python myapp_cli.py run manifest --json '{"device_id":"sensor-17"}'
+python myapp_cli.py submit manifest-remote --device-id sensor-17
+python myapp_cli.py submit manifest-remote --device-id sensor-17 --wait --wait-timeout 30
+```
+
+Submit-only CLIs register `remote_only=True` and avoid importing worker code.
+Local `run` uses the built-in in-memory factory when `local_runtime_factory` is
+omitted. Detail: [docs/cli.md](docs/cli.md). Examples:
+[examples/cli_registration/](examples/cli_registration/README.md),
+[examples/contract_interface/](examples/contract_interface/README.md).
 
 Further API detail: [docs/api.md](docs/api.md). Checks and CI:
 [docs/development.md](docs/development.md). Measured results:

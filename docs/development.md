@@ -1,8 +1,9 @@
 # Development checks and CI
 
-Canonical commands for local work and required PR gates on branch **`api_design`**
-at **`04f24f2`**. Measured outcomes: [verification.md](verification.md).
-Architecture context: [adr/](adr/README.md).
+Canonical commands for local work and required PR gates. Measured outcomes:
+[verification.md](verification.md) (hosted **`api_design` / `04f24f2`** matrix
+plus **`feature/cli`** CLI evidence). Architecture context: [adr/](adr/README.md).
+CLI user guide: [cli.md](cli.md).
 
 ## Quick start
 
@@ -149,6 +150,7 @@ Procedural detail, checkpoints, and failure evidence layouts:
 | Worker kill before/after completion | [design/worker-recovery-verification.md](design/worker-recovery-verification.md) |
 | Broker restart with same store | [design/broker-restart-verification.md](design/broker-restart-verification.md) |
 | Idle processes after short outage | [design/idle-outage-verification.md](design/idle-outage-verification.md) |
+| Installed contract-interface CLI | [design/cli-application.md](design/cli-application.md) |
 
 Example installed-process commands (match matrix minors):
 
@@ -157,6 +159,7 @@ uv run python tools/verify_cross_program.py --python 3.12 --python 3.14 --artifa
 uv run python tools/verify_worker_recovery.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue13
 uv run python tools/verify_broker_restart.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue14
 uv run python tools/verify_idle_outage.py --python 3.12 --python 3.14 --artifact-dir dist/verification/issue20
+uv run python tools/verify_cli_process.py --python 3.12 --python 3.14 --artifact-dir dist/verification/cli-process
 ```
 
 Contract typing and the contract-interface example:

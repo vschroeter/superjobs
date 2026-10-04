@@ -6,16 +6,16 @@ Pre-alpha typed jobs over NATS JetStream. Start with the repository
 | Guide | Contents |
 | --- | --- |
 | [api.md](api.md) | Public behavior, semantics, typing limits |
+| [cli.md](cli.md) | Optional Typer CLI: registration, input, local `run`, remote `submit` |
 | [payload-validation.md](payload-validation.md) | Strict boundary behavior and adapter policy |
 | [development.md](development.md) | Canonical `dev_check`, CI matrix, runner index |
-| [design/cli-registration.md](design/cli-registration.md) | Optional Typer registration shell and execution limitations |
-| [design/cli-remote.md](design/cli-remote.md) | Owned NATS submission, result waiting, execution references and cleanup |
-| [design/cli-application.md](design/cli-application.md) | Installed application commands, isolated CLI/worker proof and reference recovery |
+| [design/cli-application.md](design/cli-application.md) | Installed CLI/worker wheels, process proof, reference recovery example |
 | [verification.md](verification.md) | Dated measured results and limitations |
 | [adr/](adr/README.md) | Accepted decisions with issue links |
 
-Domain vocabulary: [CONTEXT.md](../CONTEXT.md) (not duplicated here). Reference
-revision: **`api_design`** at **`04f24f2`**.
+Domain vocabulary: [CONTEXT.md](../CONTEXT.md) (not duplicated here). Current
+product docs track branch **`feature/cli`**; hosted CI at **`api_design` /
+`04f24f2`** predates the CLI integration stage (see [verification.md](verification.md)).
 
 Follow-up work is tracked on GitHub (for example
 [Wayfinder #28](https://github.com/vschroeter/superjobs/issues/28),
@@ -47,49 +47,16 @@ Follow-up work is tracked on GitHub (for example
 
 Runnable contracts: [examples/contract_interface/README.md](../examples/contract_interface/README.md).
 
-## Original file disposition (consolidation 2026-10-03)
+## Original file disposition
 
-Every prior `docs/**/*.md` path is either retained above or merged below. Rationale
-is explicit so GitHub issues need not duplicate file history.
+Grouped history of prior `docs/**/*.md` paths (details in git). **Current** user
+guides are listed in the table above. Cross-cutting dated gate summaries live in
+[verification.md](verification.md); specialized historical evidence, baselines, and
+procedural `design/*-verification.md` files remain linked from the tables above.
 
-| Original path | Disposition | Rationale / destination |
-| --- | --- | --- |
-| `README.md` (this file) | **Rewritten** | Canonical index and disposition |
-| `api.md` | **Created** | Public API and typing-limit examples |
-| `payload-validation.md` | **Created** | Current strict validation from deleted `design/strict-payload-validation.md` |
-| `development.md` | **Created, canonical** | Absorbed `design/dev-checks-verification.md` orchestration detail |
-| `verification.md` | **Created, canonical** | Absorbed `issues22-23` and `deterministic-test-synchronization` evidence |
-| `adr/*.md` | **Created** | ADR 0001–0006 with expanded 0002/0003/0005 rationale |
-| `design/nats-test-harness.md` | **Retained** | Owned-broker protocol still needed |
-| `design/cross-program-verification.md` | **Retained** | Installed-process checkpoints |
-| `design/worker-recovery-verification.md` | **Retained** | Kill/recovery protocol |
-| `design/broker-restart-verification.md` | **Retained** | Persistent-store restart protocol |
-| `design/idle-outage-verification.md` | **Retained** | Idle outage protocol |
-| `design/reliability-repetition-verification.md` | **Retained** | Optional #22 runner detail |
-| `design/performance-baseline.md` | **Retained** | Optional #23 harness detail |
-| `design/manifest-replay-investigation.md` | **Retained diagnostic reference** | Optional #27 runner and historical evidence; no verified runtime fix |
-| `design/dev-checks-verification.md` | **Removed** | Unique CI/JUnit/wheel-isolation rules → `development.md` |
-| `design/issues22-23-verification.md` | **Removed** | Dated counts/controls → `verification.md` |
-| `design/deterministic-test-synchronization.md` | **Removed** | Issue #25 rationale → `verification.md` |
-| `design/contract-handler-interface.md` | **Removed** | Handler/context rules → ADR 0001, `api.md` |
-| `design/strict-payload-validation.md` | **Removed** | Shipped behavior → `payload-validation.md`, ADR 0002 |
-| `design/contract-interface-verification.md` | **Removed** | Gate commands → `development.md`, results → `verification.md` |
-| `design/consumer-typing-verification.md` | **Removed** | Typing gate → `development.md`, `api.md` |
-| `design/handler-registration-verification.md` | **Removed** | Registration rules → `api.md`, `verification.md` |
-| `design/producer-interface-verification.md` | **Removed** | Producer/submit → `api.md` |
-| `design/outcome-typing-verification.md` | **Removed** | Outcome typing → `api.md` |
-| `design/test-strategy.md` | **Removed** | Matrix intent → ADR 0004, `development.md` |
-| `design/reliability-performance-followups.md` | **Removed** | Optional scope → ADR 0005, `verification.md` |
-| `research/typing-baseline.md` | **Removed** | Historical baseline → `historical-typing-and-validation-notes.md` |
-| `research/contract-convenience-typing.md` | **Removed** | ParamSpec/options research → historical note |
-| `research/producer-subtype-typing-probe.md` | **Removed** | RequestJob stub evidence → historical note |
-| `research/contract-fingerprint-detection.md` | **Restored** | Primary-source fingerprint/manifest reasoning; ADR 0003 |
-| `research/strict-payload-validation.md` | **Restored** | Primary-source Pydantic probes; `payload-validation.md` |
-| `research/job-queue-api-comparison.md` | **Restored** | Comparative API research (#2) |
-| `research/historical-typing-and-validation-notes.md` | **Created** | Index for merged typing probes |
-| `performance-baselines/high-resolution/2026-10-03-baseline.md` | **Retained** | Passing #23 baseline report |
-| `performance-baselines/high-resolution/2026-10-03-baseline.json` | **Retained** | Machine-readable companion |
-| `performance-baselines/2026-10-03-failed-baseline.md` | **Retained** | Failed measurement evidence; no verified replay fix |
-| `performance-baselines/2026-10-03-failed-baseline.json` | **Retained** | Machine-readable companion |
-| `performance-baselines/2026-10-03-original-order-diagnostic.json` | **Retained** | Manifest event-read diagnostic (#27 context) |
-| `performance-baselines/README.md` | **Retained** | Artifact index |
+| Group | Disposition |
+| --- | --- |
+| **2026-10-03 core consolidation** | Created `api.md`, `payload-validation.md`, `development.md`, `verification.md`, `adr/*`; removed superseded API/typing/CI report pages (`design/test-strategy.md`, `design/strict-payload-validation.md`, and related one-off verification write-ups); retained specialized NATS/recovery/outage/repetition/performance `design/*-verification.md`; merged typing probes into `research/historical-typing-and-validation-notes.md` |
+| **2026-10-04 CLI consolidation** | Created [cli.md](cli.md); removed `design/cli-registration.md`, `design/cli-input.md`, `design/cli-local.md`, `design/cli-remote.md` (behavior → `cli.md`; slice evidence → `verification.md`); trimmed [design/cli-application.md](design/cli-application.md) to installed proof |
+| **Retained specialized `design/*`** | NATS harness, cross-program, worker recovery, broker restart, idle outage, reliability repetition, performance baseline, manifest replay investigation |
+| **Retained `research/*` and `performance-baselines/*`** | Primary-source research and measurement artifacts (see specialized table above) |

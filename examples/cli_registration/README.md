@@ -9,7 +9,7 @@ example `local_runtime_factory` (issues #39–#40). `submit` uses
 CLI applies a finite 30-second startup bound. Confirmed
 acceptance prints a JSON execution reference (`job_id`, `job_name`,
 `job_version`); without `--wait` the CLI does not wait for worker completion.
-See [CLI remote submission](../../docs/design/cli-remote.md).
+See [CLI user guide](../../docs/cli.md).
 
 ## Run
 
@@ -40,6 +40,5 @@ options, renames `mood` to `--tone`, and exposes `--excited` / `--no-excited`.
 Canonical JSON still uses `mood`. Required fields can always be supplied through
 JSON instead of positional arguments or options. Mixing input forms is an error.
 
-See [CLI input](../../docs/design/cli-input.md) for the customization API,
-[CLI local execution](../../docs/design/cli-local.md) for in-process run behavior,
-and [CLI registration](../../docs/design/cli-registration.md) for exit conventions.
+See [CLI user guide](../../docs/cli.md) for input customization, local `run`,
+remote `submit`, and exit conventions.
