@@ -97,6 +97,23 @@ def invalid_field_options_value(cli: JobCLI) -> None:
     )
 
 
+def remote_factory_wrong_yield(cli: JobCLI) -> None:
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def bad_remote():
+        yield object()  # type: ignore[misc]
+
+    JobCLI(remote_runtime_factory=bad_remote)  # expect: reportArgumentType
+
+
+def remote_factory_sync_manager(cli: JobCLI) -> None:
+    def bad_remote() -> int:
+        return 0
+
+    JobCLI(remote_runtime_factory=bad_remote)  # expect: reportArgumentType
+
+
 def invalid_positional_fields_type(cli: JobCLI) -> None:
     async def handler(
         request: ManifestNoEventsRequest,

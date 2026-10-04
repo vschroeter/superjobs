@@ -18,7 +18,7 @@ from superjobs.cli import (
     EXIT_USAGE,
     JobCLI,
 )
-from superjobs.cli.constants import UNAVAILABLE_EXECUTION_MESSAGE
+from superjobs.cli.constants import MISSING_REMOTE_FACTORY_MESSAGE
 from superjobs.cli.schema_plan import build_command_input_plan
 from superjobs.cli.strict_json import CLIInputError, parse_strict_json
 from superjobs.payload.codec.implementations.msgpack import MsgpackCodec
@@ -74,7 +74,7 @@ def test_json_and_field_mode_equivalent() -> None:
     ):
         result = runner.invoke(cli.build_typer(), argv)
         assert result.exit_code == EXIT_RUNTIME_FAILURE
-        assert UNAVAILABLE_EXECUTION_MESSAGE in result.stderr
+        assert MISSING_REMOTE_FACTORY_MESSAGE in result.stderr
 
 
 def test_json_input_file_and_stdin(tmp_path: Path) -> None:

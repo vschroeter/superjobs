@@ -4,8 +4,8 @@ Issue [Parse strict CLI JSON inputs and generate options for flat Job requests](
 adds input preparation to both `run` and `submit` on `feature/cli`. Typer is the
 main CLI library, available through `superjobs[cli]`. Local `run` execution is
 available in-process (issue #40), including the built-in isolated in-memory
-runtime when no `local_runtime_factory` is configured; remote `submit` remains
-unavailable until issue #41.
+runtime when no `local_runtime_factory` is configured; remote `submit` uses
+`remote_runtime_factory` (issue #41).
 
 ## Whole requests
 
@@ -85,11 +85,10 @@ renaming can resolve a collision; positionals do not occupy option names.
 ## Execution seam
 
 Both modes share an internal `PreparedCommandInput` containing the loaded request
-and whether a request exists. The command callback currently validates and returns
-the execution-unavailable diagnostic (exit 1). It never initializes a handler or
-runtime. Local execution is tracked in #40, NATS submission in #41, and end-to-end
-installed applications in #42. Help exits 0 and input errors exit 2; stdout remains
-empty for unsuccessful commands.
+and whether a request exists. The command callback validates input, then dispatches to local run or remote
+submit executors. It never initializes a local handler for `submit`. Help exits 0
+and input errors exit 2; stdout remains empty for unsuccessful commands.
+End-to-end installed applications are tracked in #42.
 
 The runnable [registration example](../../examples/cli_registration/README.md)
 demonstrates JSON, file/stdin, field options, booleans, enum renaming and positionals.

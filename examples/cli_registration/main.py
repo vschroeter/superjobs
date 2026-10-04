@@ -1,7 +1,8 @@
-"""JobCLI registration demo with JSON, field input, and local run (issues #39–#40)."""
+"""JobCLI registration demo with JSON, field input, local run, and NATS submit (#39–#41)."""
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -58,12 +59,23 @@ async def local_runtime() -> AsyncIterator[SuperJobs]:
 
 @asynccontextmanager
 async def remote_runtime() -> AsyncIterator[SuperJobs]:
-    """Application-owned SuperJobs lifetime for future NATS ``submit`` execution."""
+    """Application-owned SuperJobs lifetime for NATS ``submit`` execution."""
     from faststream.nats import NatsBroker
 
-    jobs = SuperJobs(broker=NatsBroker("nats://localhost:4222"))
-    async with jobs:
+    nats_url = os.environ.get("SUPERJOBS_NATS_URL", "nats://localhost:4222")
+    jobs = SuperJobs(
+        broker=NatsBroker(
+            nats_url,
+            connect_timeout=2,
+            allow_reconnect=False,
+            max_reconnect_attempts=0,
+        ),
+    )
+    try:
         yield jobs
+    finally:
+        if jobs.started:
+            await jobs.stop(graceful=False)
 
 
 def build_cli() -> JobCLI:

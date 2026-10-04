@@ -24,7 +24,7 @@ from superjobs.cli import (
     EXIT_USAGE,
     JobCLI,
 )
-from superjobs.cli.constants import REMOTE_ONLY_RUN_MESSAGE, UNAVAILABLE_EXECUTION_MESSAGE
+from superjobs.cli.constants import MISSING_REMOTE_FACTORY_MESSAGE, REMOTE_ONLY_RUN_MESSAGE
 
 
 @dataclass
@@ -128,7 +128,7 @@ def test_main_process_submit_remote() -> None:
         env={**os.environ, "PYTHONNOUSERSITE": "1"},
     )
     assert result.returncode == EXIT_RUNTIME_FAILURE
-    assert UNAVAILABLE_EXECUTION_MESSAGE in result.stderr
+    assert MISSING_REMOTE_FACTORY_MESSAGE in result.stderr
 
 
 def test_main_process_run_remote_only() -> None:
@@ -317,7 +317,7 @@ def test_submit_reports_unavailable() -> None:
     runner = CliRunner()
     result = runner.invoke(cli.build_typer(), ["submit", "echo", "--value", "1"])
     assert result.exit_code == EXIT_RUNTIME_FAILURE
-    assert UNAVAILABLE_EXECUTION_MESSAGE in result.stderr
+    assert MISSING_REMOTE_FACTORY_MESSAGE in result.stderr
 
 
 def test_main_rejects_active_event_loop() -> None:
@@ -372,7 +372,7 @@ def test_build_typer_snapshots_local_runtime_factory() -> None:
     assert calls == ["first"]
 
 
-def test_submit_help_notes_remote_unavailable() -> None:
+def test_submit_help_notes_remote_runtime_factory() -> None:
     job = _echo_job()
     cli = JobCLI()
 
@@ -382,7 +382,7 @@ def test_submit_help_notes_remote_unavailable() -> None:
     cli.add("echo", job, handler=handler)
     result = CliRunner().invoke(cli.build_typer(), ["submit", "echo", "--help"])
     assert result.exit_code == EXIT_SUCCESS
-    assert "unavailable until issue #41" in " ".join(result.stdout.split())
+    assert "remote_runtime_factory" in " ".join(result.stdout.split())
 
 
 def test_mount_on_application_typer() -> None:
@@ -496,23 +496,23 @@ def test_mount_rejects_resolved_host_names_without_mutation(name: str, kind: str
     assert before == (tuple(app.registered_commands), tuple(app.registered_groups))
 
 
-def test_unavailable_submit_does_not_initialize_dependencies(
+def test_submit_initializes_remote_runtime_not_local_handler(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls: list[str] = []
 
     def runtime_factory():
         calls.append("runtime")
-        raise AssertionError("unavailable execution must not start a runtime")
+        raise AssertionError("remote runtime startup failed in test")
 
     def handler_factory():
         calls.append("handler")
-        raise AssertionError("unavailable execution must not load worker code")
+        raise AssertionError("submit must not load worker code")
 
     cli = JobCLI(local_runtime_factory=runtime_factory, remote_runtime_factory=runtime_factory)
     cli.add("lazy", Job("tests.cli.lazy.unavailable"), handler_factory=handler_factory)
     assert cli.main(["submit", "lazy"]) == EXIT_RUNTIME_FAILURE
-    assert calls == []
+    assert calls == ["runtime"]
     assert capsys.readouterr().out == ""
 
 
@@ -550,8 +550,14 @@ def test_example_process_exit_conventions(argv: list[str], expected: int) -> Non
         example = Path(__file__).resolve().parents[1] / "examples/cli_registration/main.py"
     result = subprocess.run(
         [sys.executable, str(example), *argv],
-        capture_output=True, text=True, timeout=30,
-        env={**os.environ, "PYTHONNOUSERSITE": "1"},
+        # Remote startup and cleanup each have a 30-second budget; include
+        # interpreter startup overhead when checking the process exit.
+        capture_output=True, text=True, timeout=65,
+        env={
+            **os.environ,
+            "PYTHONNOUSERSITE": "1",
+            "SUPERJOBS_NATS_URL": "nats://127.0.0.1:1",
+        },
     )
     assert result.returncode == expected
     assert "Traceback" not in result.stderr

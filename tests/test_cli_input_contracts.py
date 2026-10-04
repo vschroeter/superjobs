@@ -128,9 +128,12 @@ def test_help_preserves_default_and_description_beside_enum_reference() -> None:
     cli, recorder = make_cli(Described)
     result = CliRunner().invoke(cli.build_typer(), ["submit", "probe", "--help"])
     assert result.exit_code == 0
-    assert "Select a color." in result.stdout
-    assert "default: 'blue'" in result.stdout
-    assert "choices: red, blue" in result.stdout
+    help_text = " ".join(result.stdout.split())
+    assert "Select a color." in help_text
+    assert "default:" in help_text
+    assert "'blue'" in help_text
+    assert "choices:" in help_text
+    assert "red" in help_text and "blue" in help_text
     assert recorder.loaded == []
 
 

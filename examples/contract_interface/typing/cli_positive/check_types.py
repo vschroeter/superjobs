@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any, assert_type
+from typing import Any, assert_type, cast
 
 from superjobs import Job, JobContext
 from superjobs.cli import CLIField, JobCLI
@@ -146,24 +146,31 @@ def _field_customization_kwargs(cli: JobCLI) -> None:
 
 
 def _typed_runtime_factories(cli: JobCLI) -> None:
+    from collections.abc import AsyncIterator
     from contextlib import asynccontextmanager
 
+    from faststream.nats import NatsBroker
+
     from superjobs import InMemoryTransport, SuperJobs
+    from superjobs.cli import RemoteRuntimeFactory
 
     @asynccontextmanager
-    async def local_runtime():
+    async def local_runtime() -> AsyncIterator[SuperJobs]:
         jobs = SuperJobs(transport=InMemoryTransport())
         async with jobs:
             yield jobs
 
     @asynccontextmanager
-    async def remote_runtime():
-        jobs = SuperJobs(transport=InMemoryTransport())
+    async def remote_runtime() -> AsyncIterator[SuperJobs]:
+        jobs = SuperJobs(broker=NatsBroker("nats://127.0.0.1:4222"))
         async with jobs:
             yield jobs
+
+    remote_factory = cast(RemoteRuntimeFactory, remote_runtime)
+    assert_type(remote_factory, RemoteRuntimeFactory)
 
     typed = JobCLI(
         local_runtime_factory=local_runtime,
-        remote_runtime_factory=remote_runtime,
+        remote_runtime_factory=remote_factory,
     )
     assert_type(typed, JobCLI)

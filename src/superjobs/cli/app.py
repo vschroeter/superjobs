@@ -58,7 +58,7 @@ class JobCLI:
     Application code owns runtime lifetime: supply ``local_runtime_factory`` for
     custom in-process ``run`` resources, or rely on the built-in isolated
     in-memory runtime when it is omitted. ``remote_runtime_factory`` is reserved
-    for NATS ``submit`` (future slice). Factories must not be invoked for help
+    for NATS ``submit``. Factories must not be invoked for help
     or when a command is not selected. Lazy ``handler_factory`` callables run
     only when a local ``run`` command is selected.
 
@@ -274,6 +274,7 @@ class JobCLI:
         run_group = typer.Typer(help="Run a Job locally in-process.")
         submit_group = typer.Typer(help="Submit a Job for remote execution.")
         local_factory = self._effective_local_runtime_factory()
+        remote_factory = self.remote_runtime_factory
         for registration in self._commands.values():
             self._register_command(
                 run_group,
@@ -285,6 +286,7 @@ class JobCLI:
                 submit_group,
                 registration,
                 mode="submit",
+                remote_runtime_factory=remote_factory,
             )
         return run_group, submit_group
 
@@ -295,6 +297,7 @@ class JobCLI:
         *,
         mode: str,
         local_runtime_factory: LocalRuntimeFactory | None = None,
+        remote_runtime_factory: RemoteRuntimeFactory | None = None,
     ) -> None:
         plan = registration.input_plan
         if plan is None:
@@ -308,10 +311,12 @@ class JobCLI:
             plan,
             mode=mode,
             local_runtime_factory=local_runtime_factory,
+            remote_runtime_factory=remote_runtime_factory,
         )
         group.command(
             name=registration.command_name,
             help=command_help_text(registration, plan, mode=mode),
+            context_settings={"max_content_width": 120},
         )(callback)
 
     def build_typer(self) -> typer.Typer:

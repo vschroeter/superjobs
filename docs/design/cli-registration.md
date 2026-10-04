@@ -31,7 +31,7 @@ Application code owns runtime lifetime via async context-manager factories:
 | Factory | Purpose |
 | --- | --- |
 | `local_runtime_factory` | Optional; yields `SuperJobs` for in-process `run` (built-in in-memory factory when omitted) |
-| `remote_runtime_factory` | Yields `SuperJobs` for NATS `submit` (future slice) |
+| `remote_runtime_factory` | Yields `SuperJobs` for NATS `submit` (issue #41) |
 
 Factories must not run for `--help` or when a command is not selected.
 Lazy `handler_factory` callables run only when a local `run` command is selected.
@@ -75,7 +75,7 @@ rejects calls from a thread that already has a running asyncio event loop.
 
 | Stream | Content |
 | --- | --- |
-| stdout | One JSON final result; accepted execution references are planned in #41 |
+| stdout | One JSON final result, or a JSON execution reference when `submit` omits `--wait` |
 | stderr | Diagnostics and observations |
 
 | Code | Meaning |
@@ -120,7 +120,8 @@ cleanup budget defined by `LOCAL_RUN_SHUTDOWN_TIMEOUT_SECONDS` (exported from
 `superjobs.cli`). See [CLI local execution](cli-local.md) for the deadlines and
 limits of in-process Python cancellation. Handler effects are not rolled back.
 
-`submit` still reports unavailable remote execution until issue #41 lands.
+`submit` uses `remote_runtime_factory` for NATS producer submission and optional
+`--wait` / `--wait-timeout` result waiting. See [cli-remote.md](cli-remote.md).
 
 Local execution semantics, shutdown bounds and validation rules are documented
 in [cli-local.md](cli-local.md).

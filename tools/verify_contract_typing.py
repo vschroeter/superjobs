@@ -68,6 +68,8 @@ RUNTIME_TEST_FILES = (
     REPO_ROOT / "tests" / "test_cli_input.py",
     REPO_ROOT / "tests" / "test_cli_input_contracts.py",
     REPO_ROOT / "tests" / "test_cli_local_run.py",
+    REPO_ROOT / "tests" / "test_cli_remote_submit.py",
+    REPO_ROOT / "tests" / "test_cli_remote_contracts.py",
 )
 
 
@@ -516,6 +518,10 @@ def run_runtime_tests(
     if runtime_dir.exists():
         shutil.rmtree(runtime_dir)
     runtime_dir.mkdir(parents=True)
+    (runtime_dir / "pytest.ini").write_text(
+        "[pytest]\nmarkers =\n    nats: tests requiring the owned NATS harness\n",
+        encoding="utf-8",
+    )
     for src in RUNTIME_TEST_FILES:
         shutil.copy2(src, runtime_dir / src.name)
     shutil.copy2(REPO_ROOT / "examples/cli_registration/main.py", runtime_dir / "cli_registration_example.py")
@@ -525,7 +531,7 @@ def run_runtime_tests(
     merged["PYTHONNOUSERSITE"] = "1"
     try:
         completed = subprocess.run(
-            [str(py), "-m", "pytest", "-q", str(runtime_dir)],
+            [str(py), "-m", "pytest", "-q", "-m", "not nats", str(runtime_dir)],
             cwd=work_dir,
             env=merged,
             text=True,
