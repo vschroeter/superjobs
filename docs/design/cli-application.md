@@ -64,13 +64,13 @@ After the CLI installation above, PowerShell commands are:
 
 ```powershell
 $cli = "$env:TEMP\superjobs-cli-only\.venv\Scripts\superjobs-contract-cli.exe"
-& $cli --help
-& $cli run bundle bundle-1
-& $cli run observe-local --device-id device-1
-& $cli run observe-local --json '{"device_id":"device-1"}'
+uv run --no-project --no-sync $cli --help
+uv run --no-project --no-sync $cli run bundle bundle-1
+uv run --no-project --no-sync $cli run observe-local --device-id device-1
+uv run --no-project --no-sync $cli run observe-local --json '{"device_id":"device-1"}'
 '{"device_id":"device-1"}' | Set-Content -Encoding utf8 request.json
-& $cli run observe-local --input request.json
-'{"device_id":"device-1"}' | & $cli run observe-local --input -
+uv run --no-project --no-sync $cli run observe-local --input request.json
+'{"device_id":"device-1"}' | uv run --no-project --no-sync $cli run observe-local --input -
 ```
 
 Local commands require no broker. `bundle` returns `{"accepted":true}`;
@@ -83,7 +83,7 @@ $env:SUPERJOBS_NATS_URL = 'nats://localhost:4222'
 $env:SUPERJOBS_CLI_RUN_ID = 'manual-example'
 $env:SUPERJOBS_CLI_STATE_DIR = "$env:TEMP\superjobs-worker-manual"
 New-Item -ItemType Directory -Force $env:SUPERJOBS_CLI_STATE_DIR | Out-Null
-& "$env:TEMP\superjobs-cli-worker\.venv\Scripts\superjobs-contract-worker.exe"
+uv run --no-project --no-sync "$env:TEMP\superjobs-cli-worker\.venv\Scripts\superjobs-contract-worker.exe"
 ```
 
 Use a fresh state directory for each worker invocation. Wait for the worker's
@@ -92,16 +92,17 @@ wait for results. In the CLI terminal:
 
 ```powershell
 $env:SUPERJOBS_NATS_URL = 'nats://localhost:4222'
-& $cli submit bundle bundle-1 --wait --wait-timeout 30
-& $cli submit observe-local --device-id device-1 --wait
-& $cli submit observe-local --json '{"device_id":"device-1"}' --wait
-& $cli submit observe-local --input request.json --wait
-'{"device_id":"device-1"}' | & $cli submit observe-local --input - --wait
-& $cli submit bundle bundle-1
+uv run --no-project --no-sync $cli submit bundle bundle-1 --wait --wait-timeout 30
+uv run --no-project --no-sync $cli submit observe-local --device-id device-1 --wait
+uv run --no-project --no-sync $cli submit observe-local --json '{"device_id":"device-1"}' --wait
+uv run --no-project --no-sync $cli submit observe-local --input request.json --wait
+'{"device_id":"device-1"}' | uv run --no-project --no-sync $cli submit observe-local --input - --wait
+uv run --no-project --no-sync $cli submit bundle bundle-1
 ```
 
-On Linux, the console commands are `.../.venv/bin/superjobs-contract-cli` and
-`.../.venv/bin/superjobs-contract-worker`; set the same variables with `export`.
+On Linux, set `$cli` to the absolute `.../.venv/bin/superjobs-contract-cli`
+path (and the worker binary similarly) and use the same `uv run --no-project
+--no-sync $cli …` form; set the same variables with `export`.
 The gate/probe/failure commands in this example exist for verification. Normal
 application code owns its own startup, handlers and worker shutdown policy.
 
@@ -175,10 +176,10 @@ Do not automatically repeat a submission whose acceptance is unknown.
 
 | Check | Command |
 | --- | --- |
-| Deterministic verifier unit tests | `python -m pytest tests/test_verify_cli_process.py -q` |
-| Installed CLI + NATS process proof | `python tools/verify_cli_process.py --python 3.12 --python 3.14` |
-| Contract typing + runtime (includes CLI example wheel) | `python tools/verify_contract_typing.py --mode both` |
-| Required integration stage | `python -m scripts.dev_check integration` (see [development.md](../development.md)) |
+| Deterministic verifier unit tests | `uv run python -m pytest tests/test_verify_cli_process.py -q` |
+| Installed CLI + NATS process proof | `uv run python tools/verify_cli_process.py --python 3.12 --python 3.14` |
+| Contract typing + runtime (includes CLI example wheel) | `uv run python tools/verify_contract_typing.py --mode both` |
+| Required integration stage | `uv run python -m scripts.dev_check integration` (see [development.md](../development.md)) |
 
 Evidence defaults to `dist/verification/cli-process/` (JSON summaries, per-scenario
 logs, origin probes). Each invocation uses a fresh `run-<uuid>` evidence directory

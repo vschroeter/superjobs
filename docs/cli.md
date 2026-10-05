@@ -16,7 +16,7 @@ Installed two-process proof (wheels, worker readiness, 23-scenario matrix):
 From a repository checkout (not published to PyPI):
 
 ```bash
-pip install -e ".[cli]"
+uv sync --extra cli
 ```
 
 Core `import superjobs` does not import Typer or `superjobs.cli`. The CLI extra
@@ -49,11 +49,11 @@ The layout below matches the [repository README](../README.md) contract
 definition. Run it without packaging:
 
 ```bash
-python myapp_cli.py --help
-python myapp_cli.py run manifest sensor-17
-python myapp_cli.py run manifest --json '{"device_id":"sensor-17"}'
-python myapp_cli.py submit manifest-remote --device-id sensor-17
-python myapp_cli.py submit manifest-remote --device-id sensor-17 --wait --wait-timeout 30
+uv run python myapp_cli.py --help
+uv run python myapp_cli.py run manifest sensor-17
+uv run python myapp_cli.py run manifest --json '{"device_id":"sensor-17"}'
+uv run python myapp_cli.py submit manifest-remote --device-id sensor-17
+uv run python myapp_cli.py submit manifest-remote --device-id sensor-17 --wait --wait-timeout 30
 ```
 
 `my_contracts.py` (same types and `MANIFEST_JOB` as the README):
@@ -145,10 +145,10 @@ managers. A custom `remote_runtime_factory` cannot be combined with constructor
 `nats_url` or `--nats-url`; the factory owns transport configuration.
 
 After packaging, map `main` through `[project.scripts]` and invoke
-`myapp run manifest sensor-17`. For remote submit with an explicit broker:
+`uv run myapp run manifest sensor-17`. For remote submit with an explicit broker:
 
 ```bash
-myapp submit --nats-url nats://broker:4222 manifest-remote --device-id sensor-17 --wait
+uv run myapp submit --nats-url nats://broker:4222 manifest-remote --device-id sensor-17 --wait
 ```
 
 Remote `submit` needs JetStream reachable at the selected URL and a **worker**
@@ -222,9 +222,9 @@ Every Job with a request accepts **one** whole-request source (mutually
 exclusive with field options and with each other):
 
 ```text
-myapp submit manifest-remote --json '{"device_id":"sensor-17"}'
-myapp submit manifest-remote --input request.json
-myapp submit manifest-remote --input -
+uv run myapp submit manifest-remote --json '{"device_id":"sensor-17"}'
+uv run myapp submit manifest-remote --input request.json
+uv run myapp submit manifest-remote --input -
 ```
 
 `--input -` reads stdin. UTF-8 only. JSON rejects duplicate keys, malformed

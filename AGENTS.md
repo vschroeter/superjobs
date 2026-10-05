@@ -36,3 +36,14 @@ behavior. Required integration checks must fail when their environment is broken
 
 Keep each iteration small and reviewable. Preserve existing work and distinguish
 measured behavior, design proposals, and unresolved questions in reports.
+
+Use **uv** exclusively for Python package and environment management and for
+running scripts, modules, and tools in this repository. Sync dependencies with
+`uv sync` or `uv sync --dev` when dev dependencies are needed; use targeted
+`uv pip install` only for exceptional layouts (for example isolated verifier
+virtual environments). Run commands with `uv run` (for example
+`uv run python -m pytest …` or `uv run python tools/verify_contract_typing.py`);
+`uv run python …` is acceptable.
+
+When an agent creates a git commit, it may push that commit to the remote
+without asking for separate push confirmation.

@@ -8,14 +8,14 @@ CLI user guide: [cli.md](cli.md).
 ## Quick start
 
 Prerequisites: final CPython interpreter, repository checkout with dev dependencies
-(`uv sync --dev` or equivalent `pytest` / `pytest-asyncio` from `pyproject.toml`).
+(`uv sync --dev` from `pyproject.toml`).
 
 | Goal | Command |
 | --- | --- |
-| Routine fast checks (no broker) | `python -m scripts.dev_check fast` |
-| Full verification (typing + NATS + installed processes) | `python -m scripts.dev_check full` |
+| Routine fast checks (no broker) | `uv run python -m scripts.dev_check fast` |
+| Full verification (typing + NATS + installed processes) | `uv run python -m scripts.dev_check full` |
 | NATS pytest only | `uv run pytest -m nats` |
-| Contract typing gate | `python tools/verify_contract_typing.py --python 3.12 --python 3.14` |
+| Contract typing gate | `uv run python tools/verify_contract_typing.py --python 3.12 --python 3.14` |
 
 `dev_check` derives the active **final CPython** minor from `sys.version_info` for
 `verify_* --python` arguments. There is no `--python` override on `dev_check`. PyPy,
@@ -48,14 +48,14 @@ uv run --isolated --no-project --python 3.12 --with-editable ".[cli]" --with "py
 Focused iteration without broker or contract typing pytest marker:
 
 ```bash
-python -m pytest -m "not nats and not contract_typing" -q
+uv run python -m pytest -m "not nats and not contract_typing" -q
 ```
 
-- **Fast** runs `pytest -m "not nats and not contract_typing"` only. No broker required.
+- **Fast** runs `uv run python -m pytest -m "not nats and not contract_typing"` only. No broker required.
 - **Full** runs fast stages plus integration (contract typing runner, real NATS pytest,
   cross-program, worker recovery, broker restart, idle outage, installed CLI).
 - **Integration** workflow jobs run heavy stages only. Contract typing uses
-  `tools/verify_contract_typing.py` directly; duplicate `pytest -m contract_typing`
+  `tools/verify_contract_typing.py` directly; duplicate `uv run python -m pytest -m contract_typing`
   is not part of orchestration.
 
 Each integration tool stage passes `--python <current-minor>` from the active
@@ -104,14 +104,14 @@ and the [2026-08 stable release blog post](https://blog.python.org/2026/08/pytho
 
 ## `dev_check full` stages (eight)
 
-1. Deterministic pytest (`not nats and not contract_typing`)
-2. Contract typing (`tools/verify_contract_typing.py`)
-3. Real NATS pytest (`pytest -m nats`)
-4. Installed cross-program (`tools/verify_cross_program.py`)
-5. Worker crash recovery (`tools/verify_worker_recovery.py`)
-6. Broker persistent-store restart (`tools/verify_broker_restart.py`)
-7. Idle outage reconnect (`tools/verify_idle_outage.py`)
-8. Installed contract-interface CLI (`tools/verify_cli_process.py`)
+1. Deterministic pytest (`uv run python -m pytest -m "not nats and not contract_typing"`)
+2. Contract typing (`uv run python tools/verify_contract_typing.py`)
+3. Real NATS pytest (`uv run pytest -m nats`)
+4. Installed cross-program (`uv run python tools/verify_cross_program.py`)
+5. Worker crash recovery (`uv run python tools/verify_worker_recovery.py`)
+6. Broker persistent-store restart (`uv run python tools/verify_broker_restart.py`)
+7. Idle outage reconnect (`uv run python tools/verify_idle_outage.py`)
+8. Installed contract-interface CLI (`uv run python tools/verify_cli_process.py`)
 
 Fast mode runs stage 1 only. Integration workflow jobs use a **15 minute** timeout;
 orchestrator integration budget **855 s** (job cap minus **45 s** upload reserve).

@@ -12,7 +12,7 @@ handler code.
 From a repository checkout:
 
 ```bash
-pip install -e .
+uv sync
 ```
 
 Use a **JetStream-enabled NATS server** reachable from both the worker and
@@ -140,11 +140,11 @@ if __name__ == "__main__":
 Run the worker and producer in **two terminals** against the same broker:
 
 ```bash
-python worker.py
+uv run python worker.py
 ```
 
 ```bash
-python producer.py
+uv run python producer.py
 ```
 
 The producer prints `sensor-17-r1`. `submit()` returns a
@@ -160,7 +160,7 @@ behavior: [ADR 0005](docs/adr/0005-broker-outage-retry-and-optional-stress.md).
 Install the CLI extra, then expose the **same** handler catalog the worker uses:
 
 ```bash
-pip install -e ".[cli]"
+uv sync --extra cli
 ```
 
 On the existing `manifest` handler in `my_handlers.py`, add `cli="manifest"` to
@@ -195,14 +195,14 @@ Remote `submit` uses the built-in NATS producer runtime. Optional default URL:
 With the NATS worker running:
 
 ```bash
-python myapp_cli.py submit manifest --device-id sensor-17 --wait
-python myapp_cli.py submit --nats-url nats://broker:4222 manifest --device-id sensor-17 --wait
+uv run python myapp_cli.py submit manifest --device-id sensor-17 --wait
+uv run python myapp_cli.py submit --nats-url nats://broker:4222 manifest --device-id sensor-17 --wait
 ```
 
 For local execution without a broker:
 
 ```bash
-python myapp_cli.py run manifest --device-id sensor-17
+uv run python myapp_cli.py run manifest --device-id sensor-17
 ```
 
 When packaging the app, map `main()` through a `[project.scripts]` entry.

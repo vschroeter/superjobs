@@ -44,7 +44,7 @@ except ModuleNotFoundError as error:
         raise
     raise ImportError(
         "SuperJobs CLI requires the optional 'cli' extra. "
-        "Install with: pip install 'superjobs[cli]'"
+        "Install with: uv pip install 'superjobs[cli]'"
     ) from error
 
 ReqT = TypeVar("ReqT")

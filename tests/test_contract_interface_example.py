@@ -1,7 +1,7 @@
 """Exercise the contract-interface example package and in-memory demo.
 
 This module covers **source-layout** behavior only: contract code is found via
-``PYTHONPATH`` (see ``CONTRACT_SRC``), not via ``pip install`` during pytest.
+``PYTHONPATH`` (see ``CONTRACT_SRC``), not via ``uv pip install`` during pytest.
 Wheel / editable-install consumer typing for ``superjobs_contract_example`` is
 verified separately by Codex (not in this pytest module).
 """

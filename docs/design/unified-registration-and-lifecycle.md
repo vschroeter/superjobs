@@ -42,7 +42,7 @@ nats_url="nats://localhost:4222")` can create and clean up a fresh producer-only
 runtime internally, only after valid `submit` input. Local `run` uses the
 catalog's handlers in an isolated in-memory runtime regardless of this URL.
 
-Proposed option placement: `myapp submit --nats-url nats://broker:4222 manifest
+Proposed option placement: `uv run myapp submit --nats-url nats://broker:4222 manifest
 --device-id sensor-17 --wait`. Making the URL a submit-group option separates
 transport configuration from request fields. Selected precedence for built-in remote mode is explicit `submit --nats-url`,
 then `SUPERJOBS_NATS_URL`, then `JobCLI(nats_url=...)`, then

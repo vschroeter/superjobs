@@ -21,23 +21,23 @@ or an ordinary worker lifetime.
 | Component | Needs |
 | --- | --- |
 | In-memory demo | Installed `superjobs` (repo `src/` or wheel), contract on `PYTHONPATH` (see below) |
-| `pytest` source test | Same; **no** `pip install` of the contract during the test |
+| `pytest` source test | Same; **no** `uv pip install` of the contract during the test |
 | Pyright suites | Project `.venv` with `superjobs` dependencies; `extraPaths` point at repo `src/` and `superjobs_contract_example/src/` (no editable contract install required) |
-| Wheel consumer typing | Non-editable wheel install of `superjobs_contract_example` (see `python tools/verify_contract_typing.py`; [issue 5](https://github.com/vschroeter/superjobs/issues/5)) |
+| Wheel consumer typing | Non-editable wheel install of `superjobs_contract_example` (see `uv run python tools/verify_contract_typing.py`; [issue 5](https://github.com/vschroeter/superjobs/issues/5)) |
 | NATS producer/worker | `NATS_URL`, `faststream[nats]`, running NATS broker |
 
-## Source-layout demo (no contract `pip install`)
+## Source-layout demo (no contract `uv pip install`)
 
 From the repository root, with `superjobs` available in the active environment:
 
 ```powershell
 $env:PYTHONPATH = "examples/contract_interface;examples/contract_interface/superjobs_contract_example/src"
-python examples/contract_interface/in_memory_demo.py
+uv run python examples/contract_interface/in_memory_demo.py
 ```
 
 ```bash
 export PYTHONPATH="examples/contract_interface:examples/contract_interface/superjobs_contract_example/src"
-python examples/contract_interface/in_memory_demo.py
+uv run python examples/contract_interface/in_memory_demo.py
 ```
 
 Expected: process exits `0` with no output (assertions only). Entire demo is bounded by `asyncio.timeout` (30s).
@@ -45,7 +45,7 @@ Expected: process exits `0` with no output (assertions only). Entire demo is bou
 ### Pytest (source example only)
 
 ```powershell
-python -m pytest tests/test_contract_interface_example.py -q
+uv run python -m pytest tests/test_contract_interface_example.py -q
 ```
 
 - `test_in_memory_contract_interface_demo` runs the demo via `sys.executable` and appends contract **source** (`superjobs_contract_example/src`) plus `examples/contract_interface` to `PYTHONPATH` for the child process only.
@@ -56,16 +56,16 @@ python -m pytest tests/test_contract_interface_example.py -q
 From the repository root:
 
 ```powershell
-python tools/verify_contract_typing.py
+uv run python tools/verify_contract_typing.py
 ```
 
 - **Source mode** checks the typing suites against repository `src/` and contract sources via generated `extraPaths`, using a fresh isolated dependency environment (or `--source-venv`) — not the repository `.venv`.
 - **Wheel mode** builds non-editable library, contract, shared handler, and CLI example wheels into a temporary work directory **outside** the repository, installs them into fresh `uv` virtual environments (default runtimes **3.12** and **3.14**), asserts `site-packages` origins (`py.typed`, no editable installs; local wheel `direct_url.json` allowed), runs copied public API, catalog, lifecycle, and CLI tests, and re-runs the typing suites with **no** source `extraPaths` and `autoSearchPaths: false`.
 - **Both mode** (default) builds wheels once, uses the same **3.12** wheel-installed environment for source (`extraPaths`) and wheel typing, and requires matching negative diagnostics.
 - Pyright is pinned to **1.1.414** (`basic`, static Python **3.12**). Negative controls use inline `# expect: <rule>` markers at each deliberate misuse site; the runner compares normalized `(file, line, rule)` multisets and requires source/wheel agreement.
-- Optional evidence: `python tools/verify_contract_typing.py --evidence C:\path\to\evidence` (writes Pyright JSON, origin-probe output, and metadata; temporary work directories are removed unless `--keep-work`).
-- Fast pytest selection (no wheel build, no Pyright subprocess): `python -m pytest -m "not nats and not contract_typing" -q`
-- Contract typing gate (full runner): `python -m pytest -m contract_typing -q` or `python tools/verify_contract_typing.py --python 3.12 --python 3.14`
+- Optional evidence: `uv run python tools/verify_contract_typing.py --evidence C:\path\to\evidence` (writes Pyright JSON, origin-probe output, and metadata; temporary work directories are removed unless `--keep-work`).
+- Fast pytest selection (no wheel build, no Pyright subprocess): `uv run python -m pytest -m "not nats and not contract_typing" -q`
+- Contract typing gate (full runner): `uv run python -m pytest -m contract_typing -q` or `uv run python tools/verify_contract_typing.py --python 3.12 --python 3.14`
 - Upgrade the checker only by changing `PYRIGHT_VERSION` in `tools/verify_contract_typing.py` and refreshing markers after review.
 
 `typing/measured_gaps` remains a documented probe suite and is **not** part of this gate.
@@ -131,7 +131,7 @@ Two overloads in a callback protocol have separate roles: one checks that the ru
 
 The inferred `HEARTBEAT_JOB` and an explicitly annotated `NoRequestJob` both reject `jobs.register(job, …)` with a request-bearing callback. `producer_negative` checks missing, mistyped and unknown constructor fields, mixed forms, invalid `SubmitOptions`, and no-request registration.
 
-Prefer `python tools/verify_contract_typing.py` for exact rule/site assertions. Manual runs may use `pyright --outputjson`, but count-only checks are not sufficient.
+Prefer `uv run python tools/verify_contract_typing.py` for exact rule/site assertions. Manual runs may use `uv tool run --from pyright==1.1.414 pyright --outputjson`, but count-only checks are not sufficient.
 
 ### Measured gaps (`typing/measured_gaps`)
 
@@ -173,7 +173,7 @@ copy examples\contract_interface\producer.py C:\tmp\contract-wheel-verify\produc
 
 Run Pyright wheel-consumer checks and/or the producer script from that layout using the isolated venv. Imports must be `superjobs_contract_example` and `superjobs` only—never `worker_handlers`.
 
-For day-to-day development, prefer the [source-layout demo](#source-layout-demo-no-contract-pip-install) and [Pyright source paths](#pyright-source-paths-no-editable-contract-install) above instead of mixing wheel and source instructions.
+For day-to-day development, prefer the [source-layout demo](#source-layout-demo-no-contract-uv-pip-install) and [Pyright source paths](#pyright-source-paths-no-editable-contract-install) above instead of mixing wheel and source instructions.
 
 ## NATS two-process demo
 
@@ -185,7 +185,7 @@ Terminal 1 (worker; lifetime unbounded until stopped):
 $env:NATS_URL = "nats://127.0.0.1:4222"
 $env:SUPERJOBS_EXAMPLE_READY_FILE = Join-Path $env:TEMP ("superjobs-contract-ready-" + [guid]::NewGuid().ToString())
 $env:PYTHONPATH = "examples/contract_interface;examples/contract_interface/superjobs_contract_example/src"
-python examples/contract_interface/worker.py
+uv run python examples/contract_interface/worker.py
 ```
 
 Terminal 2 (producer; whole flow bounded by `asyncio.timeout`; shutdown uses an explicit `wait_for`):
@@ -194,7 +194,7 @@ Terminal 2 (producer; whole flow bounded by `asyncio.timeout`; shutdown uses an 
 $env:NATS_URL = "nats://127.0.0.1:4222"
 $env:SUPERJOBS_EXAMPLE_READY_FILE = "<same path as worker>"
 $env:PYTHONPATH = "examples/contract_interface;examples/contract_interface/superjobs_contract_example/src"
-python examples/contract_interface/producer.py
+uv run python examples/contract_interface/producer.py
 ```
 
 Expected producer stdout: `producer completed all contract cases`. On timeout, assertion failure, or missing env, the producer exits non-zero (no pytest skip).
