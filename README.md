@@ -76,9 +76,38 @@ async def main() -> None:
     await jobs.serve()
 ```
 
-Define `handlers` once in a shared module using `HandlerCatalog` (see
-[docs/api.md](docs/api.md) and [examples/cli_registration/](examples/cli_registration/)).
-Legacy inline registration remains available:
+`my_handlers.py` (shared by the worker and CLI; not the contract package):
+
+```python
+from superjobs import Command, HandlerCatalog, JobContext
+
+from my_contracts import (
+    MANIFEST_JOB,
+    ManifestEvent,
+    ManifestRequest,
+    ManifestResult,
+)
+
+handlers = HandlerCatalog()
+
+
+@handlers.handler(
+    MANIFEST_JOB,
+    cli=Command(
+        name="manifest",
+        positional_fields=("device_id",),
+    ),
+)
+async def manifest(
+    request: ManifestRequest,
+    context: JobContext[ManifestEvent],
+) -> ManifestResult:
+    await context.emit(ManifestEvent(stage="validated"))
+    return ManifestResult(revision=f"{request.device_id}-r1")
+```
+
+See [docs/api.md](docs/api.md) and [examples/cli_registration/](examples/cli_registration/).
+Legacy inline registration on `SuperJobs` remains available:
 
 ```python
 async def main_legacy() -> None:
@@ -172,10 +201,10 @@ Install the optional CLI extra from a **repository checkout** (not PyPI):
 pip install -e ".[cli]"
 ```
 
-Applications register contract Jobs on `JobCLI`, expose their own console entry
-point (for example `myapp = "myapp.cli:main"`), and configure a NATS URL for remote
-submission. Custom runtime factories remain available. The library does not ship
-a global `superjobs` executable.
+Applications build `JobCLI` from the same `HandlerCatalog` as the worker, expose
+their own console entry point (for example `myapp = "myapp.cli:main"`), and set a
+default NATS URL for remote `submit`. The library does not ship a global
+`superjobs` executable.
 
 | Command | Needs broker | Worker for execution |
 | --- | --- | --- |
@@ -185,8 +214,8 @@ a global `superjobs` executable.
 
 `myapp` is **your** installed console script name (`[project.scripts]` → the same
 `main()` below), not a library-provided executable. To try the snippet without
-packaging, save section 1 as `my_contracts.py`, save the registration block as
-`myapp_cli.py` beside it, and invoke `python myapp_cli.py …`.
+packaging, save section 1 as `my_contracts.py`, section 2’s `my_handlers.py` beside
+it, the CLI block below as `myapp_cli.py`, and invoke `python myapp_cli.py …`.
 
 Request input: flat Jobs with only supported scalar fields may use generated
 options; **positionals require explicit** `positional_fields` at registration.
@@ -198,48 +227,13 @@ diagnostics. Exit `0` success, `1` runtime/transport failure, `2` usage,
 accepted executions.
 
 ```python
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-
-from faststream.nats import NatsBroker
-
-from superjobs import JobContext, SuperJobs
 from superjobs.cli import JobCLI
 
-from my_contracts import (
-    MANIFEST_JOB,
-    ManifestEvent,
-    ManifestRequest,
-    ManifestResult,
-)
-
-
-@asynccontextmanager
-async def remote_runtime() -> AsyncIterator[SuperJobs]:
-    jobs = SuperJobs(broker=NatsBroker("nats://localhost:4222"))
-    async with jobs:
-        yield jobs
+from my_handlers import handlers
 
 
 def build_cli() -> JobCLI:
-    cli = JobCLI(remote_runtime_factory=remote_runtime)
-
-    async def manifest_local(
-        request: ManifestRequest,
-        context: JobContext[ManifestEvent],
-    ) -> ManifestResult:
-        await context.emit(ManifestEvent(stage="validated"))
-        return ManifestResult(revision=request.device_id)
-
-    cli.add(
-        "manifest",
-        MANIFEST_JOB,
-        handler=manifest_local,
-        positional_fields=("device_id",),
-    )
-
-    cli.add("manifest-remote", MANIFEST_JOB, remote_only=True)
-    return cli
+    return JobCLI(handlers=handlers, nats_url="nats://localhost:4222")
 
 
 def main() -> int:
@@ -250,18 +244,36 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
+Remote `submit` uses the built-in NATS producer runtime (no custom factory in the
+snippet above). Broker URL resolution: `submit --nats-url`, then
+`SUPERJOBS_NATS_URL`, then `JobCLI(nats_url=...)`, then `nats://localhost:4222`.
+
 Example invocations (direct script; replace with `myapp` after install):
 
 ```bash
 python myapp_cli.py run manifest sensor-17
 python myapp_cli.py run manifest --json '{"device_id":"sensor-17"}'
-python myapp_cli.py submit manifest-remote --device-id sensor-17
-python myapp_cli.py submit manifest-remote --device-id sensor-17 --wait --wait-timeout 30
+python myapp_cli.py submit manifest sensor-17
+python myapp_cli.py submit --nats-url nats://broker:4222 manifest sensor-17 --wait
+python myapp_cli.py submit manifest sensor-17 --wait --wait-timeout 30
 ```
 
-Submit-only CLIs register `remote_only=True` and avoid importing worker code.
-Local `run` uses the built-in in-memory factory when `local_runtime_factory` is
-omitted. Detail: [docs/cli.md](docs/cli.md). Examples:
+The catalog-backed `manifest` command is the same name for local `run` and remote
+`submit` (handler runs in-process for `run`, on a worker for `submit`). A separate
+submit-only CLI imports just the contracts and adds `remote_only=True` commands:
+
+```python
+from superjobs.cli import JobCLI
+from my_contracts import MANIFEST_JOB
+
+cli = JobCLI(nats_url="nats://localhost:4222")
+cli.add("manifest", MANIFEST_JOB, remote_only=True)
+```
+
+Optional `local_runtime_factory` and
+`remote_runtime_factory` async context managers remain for advanced transport or
+dependency wiring when the built-in runtimes are not enough. Detail:
+[docs/cli.md](docs/cli.md). Examples:
 [examples/cli_registration/](examples/cli_registration/README.md),
 [examples/contract_interface/](examples/contract_interface/README.md).
 
