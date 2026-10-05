@@ -8,7 +8,7 @@ import signal
 import sys
 import threading
 from collections.abc import Awaitable, Callable
-from contextlib import AbstractAsyncContextManager, suppress
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, suppress
 from dataclasses import dataclass
 from typing import Any, TextIO, TypeVar, cast
 
@@ -21,8 +21,10 @@ from superjobs.cli.constants import (
     LOCAL_RUN_SHUTDOWN_TIMEOUT_SECONDS,
 )
 from superjobs.cli.input_prepare import PreparedCommandInput
+from superjobs.cli.handler_registration import register_selected_catalog_binding
 from superjobs.cli.registration import CommandRegistration
 from superjobs.cli.validation import validate_local_handler
+from superjobs.jobs.catalog_runtime import close_provider_stack
 from superjobs.jobs.events import (
     JobCancelled,
     JobCompleted,
@@ -167,16 +169,19 @@ def _resolve_handler(registration: CommandRegistration) -> Callable[..., Any]:
     return handler
 
 
-def _register_selected_handler(
+async def _register_selected_handler(
     runtime: SuperJobs,
     registration: CommandRegistration,
-) -> None:
+) -> AsyncExitStack | None:
+    if registration.catalog_binding is not None:
+        return await register_selected_catalog_binding(runtime, registration.catalog_binding)
     handler = _resolve_handler(registration)
     runtime.register(
         cast(Any, registration.job),
         cast(Any, handler),
         retry=RetryPolicy(max_attempts=1),
     )
+    return None
 
 
 async def _ensure_runtime_ready(runtime: SuperJobs) -> None:
@@ -335,6 +340,7 @@ async def _execute_local_run_async(
     signals.install()
     manager: AbstractAsyncContextManager[SuperJobs] | None = None
     runtime: SuperJobs | None = None
+    provider_stack: AsyncExitStack | None = None
     entered = False
     owned = False
     primary: BaseException | None = None
@@ -351,7 +357,11 @@ async def _execute_local_run_async(
         owned = True
         if state.requested:
             raise _LocalInterrupted
-        _register_selected_handler(runtime, registration)
+        provider_stack = await _await_phase(
+            _register_selected_handler(runtime, registration),
+            state=state, handle=None,
+            timeout=shutdown_timeout, write_error=write_error,
+        )
         await _await_phase(
             _ensure_runtime_ready(runtime), state=state, handle=None,
             timeout=shutdown_timeout, write_error=write_error,
@@ -413,6 +423,14 @@ async def _execute_local_run_async(
                 # start() can fail before SuperJobs marks itself started; stop()
                 # would then be a no-op even if the backend acquired resources.
                 await cleanup(transport.stop(), "transport startup rollback")
+        if provider_stack is not None:
+
+            async def _release_provider_stack() -> None:
+                release_error = await close_provider_stack(provider_stack)
+                if release_error is not None:
+                    raise release_error
+
+            await cleanup(_release_provider_stack(), "provider cleanup")
         if entered and manager is not None:
             await cleanup(
                 manager.__aexit__(

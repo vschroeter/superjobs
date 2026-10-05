@@ -355,3 +355,8 @@ async def _original_handler_signature_types(jobs: SuperJobs) -> None:
         return SpecificResult(revision=payload.device_id)
 
     assert_type(specific(payload=sample, ctx=context), SpecificResult)
+
+
+async def _runtime_lifecycle_helpers(jobs: SuperJobs) -> None:
+    await jobs.serve()
+    await jobs.wait_until_stopped()

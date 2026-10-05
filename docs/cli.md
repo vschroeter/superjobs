@@ -8,7 +8,7 @@ library—your package exposes something like `myapp = "myapp.cli:main"` via
 `[project.scripts]`.
 
 Measured verification and slice history: [verification.md](verification.md).
-Installed two-process proof (wheels, worker readiness, 18-scenario matrix):
+Installed two-process proof (wheels, worker readiness, 23-scenario matrix):
 [design/cli-application.md](design/cli-application.md).
 
 ## Installation
@@ -33,11 +33,17 @@ Runnable sketches:
 
 1. Shared **contract module** (`my_contracts.py` or installable package) defines
    `Job` constants and payload types (same as library producers/workers).
-2. CLI module (`myapp_cli.py`) builds a `JobCLI`, registers commands with
-   `add()`, and exposes `main()` for direct execution or `[project.scripts]`.
-3. **Worker** code stays in a separate package/process; submit-only CLIs must
-   not import worker implementations. Use `remote_only=True` when no local
-   handler exists.
+2. **Handler catalog** module (optional but recommended) defines
+   `HandlerCatalog` bindings, execution policy, lazy `provider` context
+   managers, and CLI `Command` metadata. Keep it separate from the contract
+   package and from worker-only resources.
+3. CLI module (`myapp_cli.py`) builds `JobCLI(handlers=catalog, nats_url=...)`,
+   optionally `expose()` aliases, legacy `add()` for `remote_only` commands, and
+   exposes `main()` for `[project.scripts]`.
+4. **Worker** code stays in a separate package/process:
+   `SuperJobs(..., handlers=catalog)` plus `await jobs.serve()` or an
+   application-owned `async with` / `wait_until_stopped()` loop. Submit-only
+   CLIs must not import worker implementations.
 
 The layout below matches the [repository README](../README.md) contract
 definition. Run it without packaging:
@@ -82,17 +88,10 @@ MANIFEST_JOB = Job(
 )
 ```
 
-`myapp_cli.py`:
+`handlers.py` (shared by worker and CLI; not the contract package):
 
 ```python
-import os
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-
-from faststream.nats import NatsBroker
-
-from superjobs import JobContext, SuperJobs
-from superjobs.cli import JobCLI
+from superjobs import Command, HandlerCatalog, JobContext
 
 from my_contracts import (
     MANIFEST_JOB,
@@ -101,50 +100,58 @@ from my_contracts import (
     ManifestResult,
 )
 
+handlers = HandlerCatalog()
 
-@asynccontextmanager
-async def remote_runtime() -> AsyncIterator[SuperJobs]:
-    nats_url = os.environ.get("SUPERJOBS_NATS_URL", "nats://localhost:4222")
-    jobs = SuperJobs(broker=NatsBroker(nats_url))
-    async with jobs:
-        yield jobs
+
+@handlers.handler(
+    MANIFEST_JOB,
+    cli=Command(
+        name="manifest",
+        positional_fields=("device_id",),
+    ),
+)
+async def manifest(
+    request: ManifestRequest,
+    context: JobContext[ManifestEvent],
+) -> ManifestResult:
+    await context.emit(ManifestEvent(stage="validated"))
+    return ManifestResult(revision=request.device_id)
+```
+
+`myapp_cli.py`:
+
+```python
+from superjobs.cli import JobCLI
+
+from handlers import handlers
+from my_contracts import MANIFEST_JOB
 
 
 def build_cli() -> JobCLI:
-    cli = JobCLI(remote_runtime_factory=remote_runtime)
-
-    async def manifest_local(
-        request: ManifestRequest,
-        context: JobContext[ManifestEvent],
-    ) -> ManifestResult:
-        await context.emit(ManifestEvent(stage="validated"))
-        return ManifestResult(revision=request.device_id)
-
-    cli.add(
-        "manifest",
-        MANIFEST_JOB,
-        handler=manifest_local,
-        positional_fields=("device_id",),
-    )
-
+    cli = JobCLI(handlers=handlers, nats_url="nats://localhost:4222")
     cli.add("manifest-remote", MANIFEST_JOB, remote_only=True)
     return cli
 
 
 def main() -> int:
     return build_cli().main()
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
 ```
 
-After packaging, map the same `main` through `[project.scripts]` (for example
-`myapp = "myapp.cli:main"`) and invoke `myapp run manifest sensor-17` instead of
-`python myapp_cli.py …`. SuperJobs does not read `SUPERJOBS_NATS_URL` itself; the
-example factory above does (aligned with installed examples).
+Remote `submit` uses the built-in producer runtime when `remote_runtime_factory`
+is omitted. URL resolution order: `submit --nats-url`, then `SUPERJOBS_NATS_URL`,
+then `JobCLI(nats_url=...)`, then `nats://localhost:4222`. Help and validation
+errors do not open broker connections or enter lazy handler `provider` context
+managers. A custom `remote_runtime_factory` cannot be combined with constructor
+`nats_url` or `--nats-url`; the factory owns transport configuration.
 
-Remote `submit` needs JetStream reachable from the factory URL and a **worker**
+After packaging, map `main` through `[project.scripts]` and invoke
+`myapp run manifest sensor-17`. For remote submit with an explicit broker:
+
+```bash
+myapp submit --nats-url nats://broker:4222 manifest-remote --device-id sensor-17 --wait
+```
+
+Remote `submit` needs JetStream reachable at the selected URL and a **worker**
 that registers the same `MANIFEST_JOB` handler when the execution must run.
 Confirmed acceptance does not require a worker to already be running; without
 `--wait` the CLI returns after acceptance and work can wait for worker
@@ -162,7 +169,7 @@ callability; its returned handler is resolved and validated during local executi
 | Mode | Registration | `run` | `submit` |
 | --- | --- | --- | --- |
 | Local | `handler=` or `handler_factory=` | In-process handler | Same request input; no handler invoked |
-| Remote-only | `remote_only=True`, no handler | Exit `2` (usage) | NATS submission via `remote_runtime_factory` |
+| Remote-only | `remote_only=True`, no handler | Exit `2` (usage) | NATS submission via built-in runtime or custom factory |
 
 Local `add()` overloads require `RequestJob` / `NoRequestJob` so a concrete
 handler signature can be checked. A widened `Job[Req, Res, Event]` annotation is
@@ -196,7 +203,9 @@ worker). They are **not** called for `--help` or unselected commands.
 | Factory | Used for | When omitted |
 | --- | --- | --- |
 | `local_runtime_factory` | `run` | Built-in in-memory `SuperJobs` per command |
-| `remote_runtime_factory` | `submit` | Submit exits `1` after input validation |
+| `remote_runtime_factory` | `submit` | Built-in NATS producer runtime when omitted |
+| `nats_url` on `JobCLI` | `submit` (built-in mode) | Default before `SUPERJOBS_NATS_URL` / localhost |
+| `submit --nats-url` | `submit` (built-in mode) | Overrides env and constructor URL |
 
 Local `run` validates an isolated `InMemoryTransport` runtime without
 pre-registered handlers, prior in-memory executions, or active in-memory work
@@ -298,7 +307,11 @@ Invalid input exits `2` **before** runtime startup and does not create execution
 
 ### Local `run`
 
-- One attempt (`RetryPolicy(max_attempts=1)`); no durable recovery.
+- Legacy `add(..., handler=...)` local commands use one attempt
+  (`RetryPolicy(max_attempts=1)`). Catalog-backed `run` inherits each binding's
+  configured retry and observation policy; concurrency still applies only within
+  the isolated in-memory execution.
+- No durable recovery after CLI exit.
 - Interrupt requests cooperative cancellation on the execution; side effects are
   not rolled back.
 - `LOCAL_RUN_SHUTDOWN_TIMEOUT_SECONDS` (**30 s**, exported) is the cooperative

@@ -15,6 +15,8 @@ Optional application CLI: [cli.md](cli.md). Runnable contracts:
 | `JobOutcome` narrowing, typed `JobContext` event parameter | **Implemented** |
 | Pyright **1.1.414**, `basic`, static target **3.12** on public consumer fixtures | **Measured guarantee** (not strict/mypy proof) |
 | Versioned descriptors, deterministic fingerprints, execution/manifest enforcement | **Selected, not implemented** ([#29](https://github.com/vschroeter/superjobs/issues/29), [#30](https://github.com/vschroeter/superjobs/issues/30), [Wayfinder #28](https://github.com/vschroeter/superjobs/issues/28)) |
+| Worker runtime `serve()` and `wait_until_stopped()` lifecycle helpers | **Implemented** |
+| Shared `HandlerCatalog`, runtime `handlers=` consumption, catalog-backed CLI | **Implemented** (issue [#46](https://github.com/vschroeter/superjobs/issues/46)) |
 | Blocking sync producer helpers with continuous runtime lifecycle | **Direction only** ([#36](https://github.com/vschroeter/superjobs/issues/36)) |
 | Dependency-sensitive strict validation guard | **Future** ([#32](https://github.com/vschroeter/superjobs/issues/32)) |
 | Presence-aware constructor/handler typing refinements | **Open** ([#31](https://github.com/vschroeter/superjobs/issues/31)) |
@@ -68,6 +70,30 @@ mixing a `SubmitOptions` instance with legacy option values is rejected.
 - Register with `@jobs.handler(job)` or `jobs.register(job, callback)`. Alternatively,
   `@job.handler` marks the callback's contract association, then
   `jobs.register(callback)` activates it in a runtime. Choose one startup form.
+
+### Shared handler catalog
+
+`HandlerCatalog` collects backend-free bindings (callback or lazy async-context-manager
+`provider`, concurrency, retry, observation policy, heartbeat, and optional CLI
+`Command` metadata). Workers consume a catalog with
+`SuperJobs(..., handlers=catalog)`. Runtime decorators still add bindings to the
+same catalog when one is supplied (`cli="name"` stores presentation metadata).
+Provider bindings enter at runtime startup; startup rollback and shutdown release
+entered resources. `catalog.snapshot()` is explicit; CLI construction snapshots
+bindings and does not observe later catalog mutations.
+
+```python
+from superjobs import Command, HandlerCatalog, SuperJobs
+
+handlers = HandlerCatalog()
+
+@handlers.handler(MANIFEST_JOB, concurrency=4, cli="manifest")
+async def manifest(request: ManifestRequest, context: JobContext[ManifestEvent]) -> ManifestResult:
+    ...
+
+jobs = SuperJobs(broker=broker, handlers=handlers)
+await jobs.serve()
+```
 - `context.emit` requires a declared event type on the job; forbidden when
   `event=None`.
 - Handlers for `result=None` jobs must return `None` explicitly or implicitly.
@@ -83,6 +109,20 @@ async def manifest(
     await context.emit(ManifestEvent(stage="published"))
     return ManifestResult(revision=request.device_id)
 ```
+
+## Worker runtime lifecycle
+
+Standalone workers usually call `await jobs.serve()`, which starts an unstarted
+runtime, waits for shutdown, and stops it in `finally`. An external
+`await jobs.stop()` ends the wait; task cancellation propagates after cleanup.
+`serve()` rejects runtimes that are already started or already owned by another
+lifecycle helper.
+
+Embedded workers can use `async with jobs` for startup and cleanup, run
+readiness hooks after enter, then `await jobs.wait_until_stopped()` to suspend
+until shutdown without requesting it. Multiple waiters are released when
+shutdown finishes; cancelling one waiter does not stop the runtime. Shutdown
+cleanup failures are reported by `stop()` and by waiters for that lifetime.
 
 ## Observation and durability semantics
 
@@ -244,9 +284,9 @@ Historical probe notes: [research/historical-typing-and-validation-notes.md](res
 
 ## Runtime lifecycle
 
-NATS programs typically `await jobs.start()`, run until shutdown, then
-`await jobs.stop()`. `async with jobs:` is supported. Workers must keep the
-runtime alive while consumers process work (see
+Standalone workers typically `await jobs.serve()`. Embedded programs can use
+`async with jobs:` and `await jobs.wait_until_stopped()` after publishing
+readiness. Workers keep the runtime alive while consumers process work (see
 [examples/contract_interface/worker.py](../examples/contract_interface/worker.py)).
 
 `SuperJobs(transport=InMemoryTransport())` backs fast deterministic tests without

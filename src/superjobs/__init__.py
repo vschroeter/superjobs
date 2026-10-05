@@ -56,6 +56,8 @@ from superjobs.payload import (
     construct_payload_for_type,
     validate_payload,
 )
+from superjobs.jobs.handler_catalog import HandlerBinding, HandlerCatalog, HandlerCatalogSnapshot
+from superjobs.jobs.handler_command import CLIField, Command
 from superjobs.superjobs import SuperJobs
 from superjobs.transport import (
     ExecutionRecord,
@@ -69,6 +71,11 @@ from superjobs.transport import (
 )
 
 __all__ = [
+    "CLIField",
+    "Command",
+    "HandlerBinding",
+    "HandlerCatalog",
+    "HandlerCatalogSnapshot",
     "Backoff",
     "ExponentialBackoff",
     "ExecutionRecord",

@@ -69,12 +69,14 @@ def _remote_cli(
     return cli
 
 
-def test_submit_without_factory_reports_missing_configuration() -> None:
+def test_submit_without_factory_reports_missing_configuration(
+    stub_builtin_remote_runtime: None,
+) -> None:
     cli = JobCLI()
     cli.add("echo", _echo_job("tests.cli.remote.missing"), remote_only=True)
     result = CliRunner().invoke(cli.build_typer(), ["submit", "echo", "--value", "1"])
     assert result.exit_code == EXIT_RUNTIME_FAILURE
-    assert MISSING_REMOTE_FACTORY_MESSAGE in result.stderr
+    assert "stubbed in deterministic CLI tests" in result.stderr
     assert result.stdout == ""
 
 

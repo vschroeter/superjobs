@@ -1,16 +1,26 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import AsyncExitStack
 from collections.abc import Callable, Coroutine
 from typing import Any, ParamSpec, TypeVar, overload
 
 from faststream.nats import NatsBroker
 
+from superjobs.jobs.catalog_runtime import (
+    close_provider_stack,
+    create_job_handler,
+    enter_provider_callback,
+    register_job_on_backend,
+)
 from superjobs.jobs.handler_binding import (
     ensure_marked_job,
+    get_marked_job,
     validate_handler_job_association,
     validate_handler_signature,
 )
+from superjobs.jobs.handler_catalog import HandlerBinding, HandlerCatalog, HandlerCatalogSnapshot
+from superjobs.jobs.handler_command import Command
 from superjobs.jobs.handler_decorators import (
     RuntimeHandlerDecorator,
     RuntimeNoRequestHandlerDecorator,
@@ -26,6 +36,7 @@ from superjobs.jobs.job_context import JobContext, ObservationPolicy
 from superjobs.jobs.job_handler import JobHandler
 from superjobs.jobs.retention import ObservationRetention, ResultRetention
 from superjobs.jobs.retry_policy import RetryPolicy
+from superjobs.runtime_lifecycle import ShutdownCompletion, finish_cleanup
 from superjobs.transport.backend import JobBackend
 from superjobs.transport.in_memory import InMemoryTransport
 
@@ -43,6 +54,7 @@ class SuperJobs:
         queue_config=None,
         *,
         transport: JobBackend | None = None,
+        handlers: HandlerCatalog | None = None,
         observation_policy: ObservationPolicy | None = None,
         observation_retention: ObservationRetention | None = None,
         result_retention: ResultRetention | None = None,
@@ -82,35 +94,165 @@ class SuperJobs:
         self.observation_policy = observation_policy or ObservationPolicy()
         self.graceful_shutdown_timeout = graceful_shutdown_timeout
         self._handlers: dict[str, JobHandler[Any, Any, Any]] = {}
+        self._catalog = handlers if handlers is not None else HandlerCatalog()
+        self._provider_bindings: dict[str, HandlerBinding] = {}
+        self._provider_stack: AsyncExitStack | None = None
         self._started = False
         self._lifecycle_lock = asyncio.Lock()
+        self._lifecycle_owner: asyncio.Task[Any] | None = None
+        self._active_lifecycle_generation = 0
+        self._completion: ShutdownCompletion | None = None
+        self._stop_task: asyncio.Task[None] | None = None
+        self._starting = False
+        if handlers is not None:
+            self._consume_catalog_snapshot(handlers.snapshot())
 
     @property
     def started(self) -> bool:
         return self._started
 
+    @property
+    def catalog(self) -> HandlerCatalog:
+        return self._catalog
+
+    def _consume_catalog_snapshot(self, snapshot: HandlerCatalogSnapshot) -> None:
+        for binding in snapshot:
+            key = binding.job.canonical_name
+            if binding.provider is not None:
+                self._provider_bindings[key] = binding
+            elif binding.callback is not None:
+                self._install_catalog_callback(binding)
+
+    def _install_catalog_callback(self, binding: HandlerBinding) -> None:
+        if binding.callback is None:
+            raise RuntimeError("catalog callback binding is missing a callback")
+        self._register_handler(
+            binding.job,
+            binding.callback,
+            concurrency=binding.concurrency,
+            retry=binding.retry,
+            observation_policy=binding.observation_policy,
+            heartbeat_interval=binding.heartbeat_interval,
+            catalog_source=True,
+        )
+
+    async def _activate_provider_bindings(self) -> None:
+        if not self._provider_bindings:
+            return
+        stack = AsyncExitStack()
+        self._provider_stack = stack
+        for binding in self._provider_bindings.values():
+            callback = await enter_provider_callback(binding, stack)
+            handler = create_job_handler(
+                binding,
+                callback,
+                backend=self.transport,
+                default_observation_policy=self.observation_policy,
+            )
+            register_job_on_backend(self.transport, binding.job)
+            self._handlers[binding.job.canonical_name] = handler
+
+    async def _release_provider_bindings(self, errors: list[BaseException]) -> None:
+        stack = self._provider_stack
+        self._provider_stack = None
+        if stack is None:
+            return
+        release_error = await close_provider_stack(stack)
+        if release_error is not None:
+            errors.append(release_error)
+
+    async def _rollback_start(self, start_tasks: list[asyncio.Task[None]]) -> None:
+        for task in start_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*start_tasks, return_exceptions=True)
+        errors = [
+            result for result in await asyncio.gather(
+                *(handler.stop(graceful=False) for handler in self._handlers.values()),
+                return_exceptions=True,
+            ) if isinstance(result, BaseException)
+        ]
+        await self._release_provider_bindings(errors)
+        try:
+            await self.transport.stop()
+        except BaseException as error:
+            errors.append(error)
+        if errors:
+            raise BaseExceptionGroup("Runtime startup rollback failed", errors)
+
+    async def _start_locked(self) -> ShutdownCompletion:
+        if self._stop_task is not None and not self._stop_task.done():
+            await finish_cleanup(self._stop_task)
+        self._starting = True
+        start_tasks: list[asyncio.Task[None]] = []
+        try:
+            await self._activate_provider_bindings()
+            await self.transport.start()
+            start_tasks = [
+                asyncio.create_task(handler.start(), name=f"superjobs-handler-start-{key}")
+                for key, handler in self._handlers.items()
+            ]
+            if start_tasks:
+                await asyncio.gather(*start_tasks)
+        except BaseException as error:
+            rollback = asyncio.create_task(self._rollback_start(start_tasks))
+            try:
+                await finish_cleanup(rollback)
+            except BaseException as cleanup_error:
+                error.add_note(f"Startup rollback also failed: {cleanup_error!r}")
+            raise
+        finally:
+            self._starting = False
+        self._active_lifecycle_generation += 1
+        self._completion = ShutdownCompletion()
+        self._stop_task = None
+        self._started = True
+        return self._completion
+
     async def start(self) -> None:
         async with self._lifecycle_lock:
             if self._started:
                 return
+            if self._lifecycle_owner is not None:
+                raise RuntimeError("A SuperJobs lifecycle owner is already active")
+            await self._start_locked()
 
-            await self.transport.start()
-            self._started = True
+    async def _stop_generation(
+        self,
+        completion: ShutdownCompletion,
+        *,
+        graceful: bool,
+        timeout: float | None,
+    ) -> None:
+        try:
+            results = await asyncio.gather(
+                *(handler.stop(graceful=graceful, timeout=timeout)
+                  for handler in self._handlers.values()),
+                return_exceptions=True,
+            )
+            errors = [result for result in results if isinstance(result, BaseException)]
+            if errors:
+                completion.error = errors[0]
+                for error in errors[1:]:
+                    completion.error.add_note(f"Additional handler shutdown failure: {error!r}")
+        except BaseException as error:
+            completion.error = error
+        finally:
+            release_errors: list[BaseException] = []
+            await self._release_provider_bindings(release_errors)
+            if release_errors and completion.error is None:
+                completion.error = release_errors[0]
+                for error in release_errors[1:]:
+                    completion.error.add_note(f"Additional provider release failure: {error!r}")
             try:
-                await asyncio.gather(
-                    *(handler.start() for handler in self._handlers.values()),
-                )
-            except BaseException:
-                self._started = False
-                await asyncio.gather(
-                    *(
-                        handler.stop(graceful=False)
-                        for handler in self._handlers.values()
-                    ),
-                    return_exceptions=True,
-                )
                 await self.transport.stop()
-                raise
+            except BaseException as error:
+                if completion.error is None:
+                    completion.error = error
+                else:
+                    completion.error.add_note(f"Transport shutdown also failed: {error!r}")
+            finally:
+                completion.done.set()
 
     async def stop(
         self,
@@ -121,25 +263,62 @@ class SuperJobs:
         if timeout is not None and timeout <= 0:
             raise ValueError("timeout must be positive")
         async with self._lifecycle_lock:
-            if not self._started:
+            completion = self._completion
+            if self._stop_task is not None and not self._stop_task.done():
+                task = self._stop_task
+            elif not self._started:
                 return
-            self._started = False
-            drain_timeout = (
-                timeout
-                if timeout is not None
-                else self.graceful_shutdown_timeout
-            )
-            await asyncio.gather(
-                *(
-                    handler.stop(
+            else:
+                assert completion is not None
+                self._started = False
+                task = self._stop_task = asyncio.create_task(
+                    self._stop_generation(
+                        completion,
                         graceful=graceful,
-                        timeout=drain_timeout,
-                    )
-                    for handler in self._handlers.values()
-                ),
-                return_exceptions=True,
-            )
-            await self.transport.stop()
+                        timeout=timeout if timeout is not None else self.graceful_shutdown_timeout,
+                    ),
+                    name="superjobs-shutdown",
+                )
+        await finish_cleanup(task)
+        if completion is not None and completion.error is not None:
+            raise completion.error
+
+    async def serve(self) -> None:
+        """Own startup, waiting, and graceful shutdown of an unstarted runtime.
+
+        Cancellation propagates after cleanup. No process signal handlers are
+        installed. An external stop releases this owner after draining completes.
+        """
+        async with self._lifecycle_lock:
+            if self._lifecycle_owner is not None:
+                raise RuntimeError("A SuperJobs lifecycle owner is already active")
+            if self._started or (self._stop_task is not None and not self._stop_task.done()):
+                raise RuntimeError("SuperJobs runtime is already started or stopping")
+            self._lifecycle_owner = asyncio.current_task()
+            try:
+                completion = await self._start_locked()
+            except BaseException:
+                self._lifecycle_owner = None
+                raise
+        try:
+            await completion.wait()
+        finally:
+            try:
+                await self.stop()
+            finally:
+                async with self._lifecycle_lock:
+                    self._lifecycle_owner = None
+
+    async def wait_until_stopped(self) -> None:
+        """Observe the active lifetime, including drain, without owning it.
+
+        Independent waiter cancellation never requests runtime shutdown. A
+        captured generation retains its outcome even if the runtime restarts.
+        """
+        completion = self._completion
+        if completion is None or completion.done.is_set():
+            raise RuntimeError("SuperJobs runtime is not started")
+        await completion.wait()
 
     async def __aenter__(self) -> SuperJobs:
         await self.start()
@@ -157,6 +336,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
     ) -> RuntimeNoRequestHandlerDecorator[FinalT, InterT]: ...
 
     @overload
@@ -168,6 +348,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
     ) -> RuntimeHandlerDecorator[ReqT, FinalT, InterT]: ...
 
     def handler(
@@ -178,6 +359,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
     ) -> RuntimeHandlerDecorator[Any, Any, Any] | RuntimeNoRequestHandlerDecorator[Any, Any]:
         if job.request_type is None:
             return RuntimeNoRequestHandlerDecorator(
@@ -187,6 +369,7 @@ class SuperJobs:
                 retry=retry,
                 observation_policy=observation_policy,
                 heartbeat_interval=heartbeat_interval,
+                cli=cli,
             )
         return RuntimeHandlerDecorator(
             self,
@@ -195,6 +378,7 @@ class SuperJobs:
             retry=retry,
             observation_policy=observation_policy,
             heartbeat_interval=heartbeat_interval,
+            cli=cli,
         )
 
     # Compatibility alias for the original sketch while callers migrate.
@@ -310,6 +494,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
     ) -> None:
         if callback is not None:
             if not isinstance(job_or_marked, Job):
@@ -321,6 +506,7 @@ class SuperJobs:
                 retry=retry,
                 observation_policy=observation_policy,
                 heartbeat_interval=heartbeat_interval,
+                cli=cli,
             )
             return
 
@@ -338,6 +524,7 @@ class SuperJobs:
             retry=retry,
             observation_policy=observation_policy,
             heartbeat_interval=heartbeat_interval,
+            cli=cli,
         )
 
     @overload
@@ -364,12 +551,54 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        catalog_source: bool = False,
     ) -> None:
+        if self._starting:
+            raise RuntimeError("Cannot register handlers while the runtime is starting")
+        if self._stop_task is not None and not self._stop_task.done():
+            raise RuntimeError(
+                "Cannot register handlers while the runtime is shutting down",
+            )
+        key = job.canonical_name
+        if key in self._handlers or key in self._provider_bindings:
+            raise ValueError(f"A handler is already registered for {job}")
+
+        if not catalog_source:
+            existing = self._catalog.get(job)
+            if existing is not None:
+                if existing.provider is not None:
+                    raise ValueError(
+                        f"A catalog provider binding already exists for {job}",
+                    )
+                if existing.callback is not None and existing.callback is not callback:
+                    raise ValueError(
+                        f"Catalog binding for {job} does not match the runtime handler",
+                    )
+                if cli is not None:
+                    raise ValueError(
+                        f"A catalog binding already exists for {job}; "
+                        "cannot attach cli metadata through the runtime",
+                    )
+
         validate_handler_job_association(job, callback)
         validate_handler_signature(job, callback)
-        key = job.canonical_name
-        if key in self._handlers:
-            raise ValueError(f"A handler is already registered for {job}")
+
+        if not catalog_source:
+            existing = self._catalog.get(job)
+            if existing is None:
+                marked = get_marked_job(callback)
+                if marked is None or marked is job:
+                    self._catalog._register_callback(
+                        job,
+                        callback,
+                        concurrency=concurrency,
+                        retry=retry,
+                        observation_policy=observation_policy,
+                        heartbeat_interval=heartbeat_interval,
+                        cli=cli,
+                        attach_marker=False,
+                    )
 
         handler = JobHandler(
             job,
@@ -381,9 +610,7 @@ class SuperJobs:
             heartbeat_interval=heartbeat_interval,
         )
 
-        register_job = getattr(self.transport, "register_job", None)
-        if register_job is not None:
-            register_job(job)
+        register_job_on_backend(self.transport, job)
 
         self._handlers[key] = handler
         if self._started:

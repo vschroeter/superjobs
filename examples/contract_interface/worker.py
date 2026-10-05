@@ -9,7 +9,7 @@ from pathlib import Path
 from faststream.nats import NatsBroker
 
 from superjobs import SuperJobs
-from worker_handlers import register_contract_handlers
+from catalog_handlers import CONTRACT_CATALOG
 
 STARTUP_TIMEOUT = 30.0
 
@@ -32,15 +32,20 @@ async def _run() -> None:
 
     jobs = SuperJobs(
         broker=NatsBroker(nats_url, connect_timeout=5),
+        handlers=CONTRACT_CATALOG,
     )
-    register_contract_handlers(jobs)
-    await asyncio.wait_for(jobs.start(), timeout=STARTUP_TIMEOUT)
+    try:
+        await asyncio.wait_for(jobs.start(), timeout=STARTUP_TIMEOUT)
+    except TimeoutError:
+        raise SystemExit(f"worker did not start within {STARTUP_TIMEOUT}s") from None
     try:
         ready_path.write_text("ready", encoding="utf-8")
         print("worker ready", flush=True)
-        await asyncio.Event().wait()
+        try:
+            await jobs.wait_until_stopped()
+        finally:
+            ready_path.unlink(missing_ok=True)
     finally:
-        ready_path.unlink(missing_ok=True)
         await jobs.stop()
 
 

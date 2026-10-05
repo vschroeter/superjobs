@@ -3,6 +3,39 @@
 Dated measured results. Commands and matrix: [development.md](development.md).
 This file records **what was run**, not product SLOs.
 
+## Unified catalog, CLI metadata, and worker lifetime (2026-10-05)
+
+Independent local verification of the implementation for issues
+[#43](https://github.com/vschroeter/superjobs/issues/43)–
+[#47](https://github.com/vschroeter/superjobs/issues/47), on `feature/cli` based
+on `23b4419`. Cursor Composer 2.5 implemented bounded slices; Codex reviewed
+them and corrected lifecycle failures after repeated unsuccessful Cursor passes.
+
+| Check | Measured result |
+| --- | --- |
+| `dev_check fast`, Windows × Python 3.12 / 3.13 / 3.14 | All three passed; 772 passed, 2 platform/optional skips per cell |
+| `dev_check fast`, Linux × Python 3.12 / 3.13 / 3.14 | All three passed; 771 passed, 3 platform/optional skips per cell |
+| `dev_check integration`, Windows/Linux × Python 3.12 / 3.14 | All four passed all seven required stages |
+| Public source/wheel typing, pinned Pyright 1.1.414 | Positive suites passed; exact negative diagnostic sets matched (catalog: 9 expected errors) |
+| Installed public-import runtime tests | Windows: 300 passed per runtime; Linux: 301 passed per runtime; origins verified |
+| Required real NATS pytest | 20 passed per integration cell, no skips |
+| Installed CLI / separate worker | 23 scenarios passed per integration cell; catalog providers, URL override, cooperative serving stop, and process interrupt included |
+| Changed implementation static check | 25 files, zero errors and warnings |
+| Broken required NATS control | Missing `NATS_EXECUTABLE`: exit 1, visible setup error, no skip |
+
+The integration stages also passed installed cross-program execution, worker
+recovery, broker persistent-store restart, and idle outage reconnect. Evidence
+is under the gitignored `dist/implementation/unified-api/` directory:
+`windows-fast-*`, `linux-fast-*`, `windows-integration-*`,
+`linux-integration-*`, `implementation-typing-final.json`, and
+`broken-nats-control.log`. This is local Windows and WSL Linux evidence;
+no new hosted CI run or package publication is claimed.
+
+The subsequent review tightened the metadata mutation test to use its original
+dictionary; all 13 catalog tests passed. Documentation and example imports use
+the public API. Runtime serving does not install global signal handlers, and
+arbitrary cancellation-resistant Python callbacks still require cooperation.
+
 ## Gate shape: historical vs current
 
 | Era | Branch / revision | `dev_check full` | `dev_check integration` | Hosted CI |

@@ -1,60 +1,35 @@
-"""File-based gate synchronization for CLI process verification."""
+"""CLI-local sync helpers; gate coordination lives in ``superjobs_contract_handlers.sync``."""
 
 from __future__ import annotations
 
-import asyncio
-import json
 import os
-from collections.abc import Awaitable, Callable
-from pathlib import Path
 
+from superjobs_contract_handlers.sync import (
+    gate_release_path,
+    wait_for_gate_release,
+    write_gate_release,
+    write_handler_entered,
+    write_provider_closed,
+    write_provider_entered,
+)
 
-def _sync_root() -> Path:
-    raw = os.environ.get("SUPERJOBS_CLI_SYNC_DIR") or os.environ.get("SUPERJOBS_CLI_STATE_DIR")
-    if not raw:
-        raise RuntimeError("SUPERJOBS_CLI_SYNC_DIR or SUPERJOBS_CLI_STATE_DIR must be set for gated CLI jobs")
-    return Path(raw)
-
-
-def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(path)
-
-
-def gate_release_path(gate: str) -> Path:
-    return _sync_root() / f"release_{gate}.json"
-
-
-async def wait_for_gate_release(
-    gate: str, *, poll_interval: float = 0.05,
-    check_cancelled: Callable[[], Awaitable[None]] | None = None,
-) -> None:
-    path = gate_release_path(gate)
-    while not path.is_file():
-        if check_cancelled is not None:
-            await check_cancelled()
-        await asyncio.sleep(poll_interval)
-
-
-def write_gate_release(gate: str) -> None:
-    _write_json_atomic(gate_release_path(gate), {"released": True, "gate": gate})
-
-
-def write_handler_entered(gate: str, *, execution_id: str | None = None, run_id: str | None = None) -> None:
-    payload: dict[str, object] = {"checkpoint": "handler_entered", "gate": gate}
-    if execution_id is not None:
-        payload["execution_id"] = execution_id
-    if run_id is not None:
-        payload["run_id"] = run_id
-    path = _sync_root() / f"checkpoint_handler_entered_{gate}.json"
-    _write_json_atomic(path, payload)
+__all__ = [
+    "gate_release_path",
+    "wait_for_gate_release",
+    "write_gate_release",
+    "write_handler_entered",
+    "write_runtime_factory_closed",
+    "write_runtime_factory_entered",
+    "write_provider_closed",
+    "write_provider_entered",
+]
 
 
 def write_runtime_factory_entered(mode: str) -> None:
     if os.environ.get("SUPERJOBS_CLI_EMIT_FACTORY") != "1":
         return
+    from superjobs_contract_handlers.sync import _sync_root, _write_json_atomic
+
     _write_json_atomic(
         _sync_root() / "checkpoint_runtime_factory_entered.json",
         {"checkpoint": "runtime_factory_entered", "mode": mode},
@@ -62,8 +37,11 @@ def write_runtime_factory_entered(mode: str) -> None:
 
 
 def write_runtime_factory_closed(mode: str) -> None:
-    if os.environ.get("SUPERJOBS_CLI_EMIT_FACTORY") == "1":
-        _write_json_atomic(
-            _sync_root() / "checkpoint_runtime_factory_closed.json",
-            {"checkpoint": "runtime_factory_closed", "mode": mode},
-        )
+    if os.environ.get("SUPERJOBS_CLI_EMIT_FACTORY") != "1":
+        return
+    from superjobs_contract_handlers.sync import _sync_root, _write_json_atomic
+
+    _write_json_atomic(
+        _sync_root() / "checkpoint_runtime_factory_closed.json",
+        {"checkpoint": "runtime_factory_closed", "mode": mode},
+    )

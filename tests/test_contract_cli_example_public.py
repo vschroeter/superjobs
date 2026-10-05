@@ -12,7 +12,11 @@ def test_build_cli_is_public_api(monkeypatch: pytest.MonkeyPatch) -> None:
     # tree and must import the installed application; missing installs fail.
     examples = Path(__file__).resolve().parents[1] / "examples" / "contract_interface"
     if examples.is_dir():
-        for package in ("superjobs_contract_example", "superjobs_contract_cli_example"):
+        for package in (
+            "superjobs_contract_example",
+            "superjobs_contract_handlers",
+            "superjobs_contract_cli_example",
+        ):
             monkeypatch.syspath_prepend(str(examples / package / "src"))
     from superjobs_contract_cli_example import build_cli
     from superjobs.cli import JobCLI

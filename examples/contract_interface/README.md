@@ -4,10 +4,17 @@ Runnable sketch for shared **contract packages**, producer/worker split, and mea
 
 For installed console commands with local `run` and NATS `submit`, see
 [CLI application integration](../../docs/design/cli-application.md). The CLI,
-worker and worker resource packages are built into separate non-editable wheels;
+worker, shared handler catalog, and worker resource packages are built into separate non-editable wheels;
 the CLI environment excludes worker implementation and resource dependencies.
 `tools/verify_cli_process.py` exercises installed commands and a separately
 installed worker on owned NATS, including recovery after producer exit.
+
+The shared catalog is in `superjobs_contract_handlers`; ordinary workers and
+local CLI commands consume the same definitions and execution policy. Producers
+import only `superjobs_contract_example`. Remote submission uses the built-in
+NATS runtime, with `submit --nats-url <url>` overriding environment and configured
+URLs. Managed handler providers are acquired only by a selected local command
+or an ordinary worker lifetime.
 
 ## Dependencies
 
@@ -53,7 +60,7 @@ python tools/verify_contract_typing.py
 ```
 
 - **Source mode** checks the typing suites against repository `src/` and contract sources via generated `extraPaths`, using a fresh isolated dependency environment (or `--source-venv`) — not the repository `.venv`.
-- **Wheel mode** builds non-editable `superjobs` and `superjobs_contract_example` wheels into a temporary work directory **outside** the repository, installs them into fresh `uv` virtual environments (default runtimes **3.12** and **3.14**), asserts `site-packages` origins (`py.typed`, no editable installs; local wheel `direct_url.json` allowed), runs copied `tests/test_handler_registration.py` and `tests/test_public_api.py`, and re-runs the typing suites with **no** source `extraPaths` and `autoSearchPaths: false`.
+- **Wheel mode** builds non-editable library, contract, shared handler, and CLI example wheels into a temporary work directory **outside** the repository, installs them into fresh `uv` virtual environments (default runtimes **3.12** and **3.14**), asserts `site-packages` origins (`py.typed`, no editable installs; local wheel `direct_url.json` allowed), runs copied public API, catalog, lifecycle, and CLI tests, and re-runs the typing suites with **no** source `extraPaths` and `autoSearchPaths: false`.
 - **Both mode** (default) builds wheels once, uses the same **3.12** wheel-installed environment for source (`extraPaths`) and wheel typing, and requires matching negative diagnostics.
 - Pyright is pinned to **1.1.414** (`basic`, static Python **3.12**). Negative controls use inline `# expect: <rule>` markers at each deliberate misuse site; the runner compares normalized `(file, line, rule)` multisets and requires source/wheel agreement.
 - Optional evidence: `python tools/verify_contract_typing.py --evidence C:\path\to\evidence` (writes Pyright JSON, origin-probe output, and metadata; temporary work directories are removed unless `--keep-work`).

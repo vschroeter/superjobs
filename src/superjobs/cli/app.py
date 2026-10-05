@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal, ParamSpec, TypeVar, overload
 
+from superjobs.cli.builtin_remote_runtime import builtin_remote_runtime
+from superjobs.cli.catalog_cli import auto_expose_catalog_bindings, command_registration_from_binding
 from superjobs.cli.command_callback import build_job_command_callback, command_help_text
 from superjobs.cli.default_local_runtime import default_local_runtime_factory
 from superjobs.cli.runtime_factory import LocalRuntimeFactory, RemoteRuntimeFactory
+from superjobs.jobs.handler_catalog import HandlerCatalog, HandlerCatalogSnapshot
 from superjobs.cli.composition import assert_mount_names_available
 from superjobs.cli.field_config import CLIField
 from superjobs.cli.constants import (
@@ -52,6 +56,11 @@ _MOUNT_GROUP_NAMES = ("run", "submit")
 
 
 @dataclass
+class _SubmitTransportState:
+    nats_url_override: str | None = None
+
+
+@dataclass
 class JobCLI:
     """Register contract Jobs as CLI commands backed by Typer.
 
@@ -62,11 +71,17 @@ class JobCLI:
     or when a command is not selected. Lazy ``handler_factory`` callables run
     only when a local ``run`` command is selected.
 
+    When ``handlers`` is supplied, a snapshot of catalog bindings with CLI
+    metadata is exposed automatically. ``expose()`` projects additional aliases
+    without duplicating worker subscriptions.
+
     ``build_typer()`` and ``mount()`` snapshot the current registration table at
     call time. Later ``add()`` calls do not alter Typer objects already built or
     mounted.
     """
 
+    handlers: HandlerCatalog | None = None
+    nats_url: str | None = None
     local_runtime_factory: LocalRuntimeFactory | None = None
     remote_runtime_factory: RemoteRuntimeFactory | None = None
     _commands: dict[str, CommandRegistration] = field(
@@ -74,6 +89,48 @@ class JobCLI:
         init=False,
         repr=False,
     )
+    _catalog_snapshot: HandlerCatalogSnapshot | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if self.remote_runtime_factory is not None and self.nats_url is not None:
+            raise CLIRegistrationError(
+                "remote_runtime_factory cannot be combined with constructor nats_url",
+            )
+        if self.handlers is not None:
+            self._catalog_snapshot = self.handlers.snapshot()
+            auto_expose_catalog_bindings(self._catalog_snapshot, self._commands)
+
+    def expose(
+        self,
+        command_name: str,
+        job: Job[Any, Any, Any],
+        *,
+        aliases: tuple[str, ...] = (),
+        positional_fields: tuple[str, ...] = (),
+        field_options: Mapping[str, CLIField] | None = None,
+    ) -> None:
+        """Expose an existing catalog binding under ``command_name`` and optional aliases."""
+        if self._catalog_snapshot is None:
+            raise CLIRegistrationError("expose() requires JobCLI(handlers=...)")
+        binding = self._catalog_snapshot.get(job)
+        if binding is None:
+            raise CLIRegistrationError(
+                f"no catalog binding for {job.canonical_name!r} in the CLI snapshot",
+            )
+        names = (command_name, *aliases)
+        for name in names:
+            if name in self._commands:
+                raise CLIRegistrationError(f"duplicate command_name {name!r}")
+            self._commands[name] = command_registration_from_binding(
+                name,
+                binding,
+                positional_fields=positional_fields or None,
+                field_options=field_options,
+            )
 
     @overload
     def add(
@@ -270,11 +327,52 @@ class JobCLI:
             return self.local_runtime_factory
         return default_local_runtime_factory
 
+    def _builtin_remote_runtime_factory(
+        self,
+        *,
+        constructor_url: str | None,
+        submit_state: _SubmitTransportState,
+    ) -> RemoteRuntimeFactory:
+        @asynccontextmanager
+        async def _builtin() -> AsyncIterator[SuperJobs]:
+            async with builtin_remote_runtime(
+                constructor_url=constructor_url,
+                cli_override=submit_state.nats_url_override,
+            ) as runtime:
+                yield runtime
+
+        return _builtin
+
     def _build_run_submit_groups(self) -> tuple[typer.Typer, typer.Typer]:
         run_group = typer.Typer(help="Run a Job locally in-process.")
         submit_group = typer.Typer(help="Submit a Job for remote execution.")
         local_factory = self._effective_local_runtime_factory()
-        remote_factory = self.remote_runtime_factory
+        submit_state = _SubmitTransportState()
+        captured_remote_factory = self.remote_runtime_factory
+        captured_constructor_url = self.nats_url
+        if captured_remote_factory is not None:
+            remote_factory = captured_remote_factory
+        else:
+            remote_factory = self._builtin_remote_runtime_factory(
+                constructor_url=captured_constructor_url,
+                submit_state=submit_state,
+            )
+
+        @submit_group.callback()
+        def _submit_group_options(
+            ctx: typer.Context,
+            nats_url: str | None = typer.Option(
+                None,
+                "--nats-url",
+                help="NATS broker URL for remote submission (overrides env and constructor).",
+            ),
+        ) -> None:
+            if captured_remote_factory is not None and nats_url is not None:
+                raise typer.BadParameter(
+                    "--nats-url cannot be used with remote_runtime_factory",
+                )
+            submit_state.nats_url_override = nats_url
+
         for registration in self._commands.values():
             self._register_command(
                 run_group,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import os
 import queue
@@ -927,6 +928,66 @@ def test_transport_acquired_before_startup_failure_is_closed() -> None:
     assert not transport.started
     assert transport._owners == 0
     assert result.stdout == ""
+
+
+@pytest.mark.asyncio
+async def test_catalog_provider_closes_after_handler_on_interrupt() -> None:
+    from contextlib import asynccontextmanager
+
+    from superjobs import HandlerCatalog
+
+    catalog = HandlerCatalog()
+    job = _echo_job()
+    provider_entered = asyncio.Event()
+    provider_exited = asyncio.Event()
+    handler_started = asyncio.Event()
+
+    @asynccontextmanager
+    async def provider():
+        provider_entered.set()
+        try:
+
+            async def inner(request: EchoRequest, context: JobContext[None]) -> EchoResult:
+                handler_started.set()
+                await asyncio.Event().wait()
+                return EchoResult(text="never")
+
+            yield inner
+        finally:
+            provider_exited.set()
+
+    catalog.bind(job, provider=provider, cli="prov")
+    cli = JobCLI(handlers=catalog)
+    registration = next(r for r in cli.registrations() if r.command_name == "prov")
+    plan = build_command_input_plan(job)
+    prepared = prepare_command_input(plan, {"json_text": '{"value": 1}'}, None)
+
+    @asynccontextmanager
+    async def factory() -> AsyncIterator[SuperJobs]:
+        async with SuperJobs(transport=InMemoryTransport()) as jobs:
+            yield jobs
+
+    async def exercise() -> tuple[bool, bool]:
+        state = _InterruptState(asyncio.Event())
+
+        async def trigger() -> None:
+            await handler_started.wait()
+            state.event.set()
+
+        asyncio.create_task(trigger())
+        await _execute_local_run_async(
+            registration,
+            prepared,
+            factory,
+            stderr=io.StringIO(),
+            shutdown_timeout=0.2,
+            interrupt_state=state,
+        )
+        return provider_entered.is_set(), provider_exited.is_set()
+
+    entered, exited = await exercise()
+    assert entered
+    assert exited
 
 
 def test_native_sigint_has_no_success_stdout_and_restores_signal() -> None:

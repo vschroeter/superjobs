@@ -107,7 +107,11 @@ def test_core_import_does_not_load_cli_machinery() -> None:
         (["--help"], EXIT_SUCCESS),
     ],
 )
-def test_main_exit_codes(argv: list[str], expected_code: int) -> None:
+def test_main_exit_codes(
+    argv: list[str],
+    expected_code: int,
+    stub_builtin_remote_runtime: None,
+) -> None:
     cli = _remote_cli()
     assert cli.main(argv) == expected_code
 
@@ -147,10 +151,14 @@ def test_main_process_submit_remote() -> None:
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
-        env={**os.environ, "PYTHONNOUSERSITE": "1"},
+        env={
+            **os.environ,
+            "PYTHONNOUSERSITE": "1",
+            "SUPERJOBS_NATS_URL": "nats://127.0.0.1:1",
+        },
     )
     assert result.returncode == EXIT_RUNTIME_FAILURE
-    assert MISSING_REMOTE_FACTORY_MESSAGE in result.stderr
+    assert "Error:" in result.stderr
 
 
 def test_main_process_run_remote_only() -> None:
@@ -332,14 +340,14 @@ def test_run_local_uses_default_in_memory_factory() -> None:
     assert json.loads(result.stdout) == {"text": "1"}
 
 
-def test_submit_reports_unavailable() -> None:
+def test_submit_reports_unavailable(stub_builtin_remote_runtime: None) -> None:
     job = _echo_job()
     cli = JobCLI()
     cli.add("echo", job, remote_only=True)
     runner = CliRunner()
     result = runner.invoke(cli.build_typer(), ["submit", "echo", "--value", "1"])
     assert result.exit_code == EXIT_RUNTIME_FAILURE
-    assert MISSING_REMOTE_FACTORY_MESSAGE in result.stderr
+    assert "stubbed in deterministic CLI tests" in result.stderr
 
 
 def test_main_rejects_active_event_loop() -> None:
@@ -483,7 +491,7 @@ def test_sync_handler_registration() -> None:
     assert result.exit_code == EXIT_SUCCESS
 
 
-def test_no_request_job_registration() -> None:
+def test_no_request_job_registration(stub_builtin_remote_runtime: None) -> None:
     job = Job("tests.cli.noop", version="v1", result=EchoResult)
     cli = JobCLI()
 

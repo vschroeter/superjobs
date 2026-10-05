@@ -142,6 +142,7 @@ def test_broker_cleanup_failure_fails_pass_and_retains_evidence(
     bundle = vcp.WheelBundle(
         library=tmp_path / "lib.whl",
         contract=tmp_path / "contract.whl",
+        handlers=tmp_path / "handlers.whl",
         cli_example=tmp_path / "cli.whl",
         worker_example=tmp_path / "worker.whl",
         worker_resources=tmp_path / "worker_resources.whl",

@@ -70,13 +70,21 @@ from my_contracts import MANIFEST_JOB, ManifestEvent, ManifestRequest, ManifestR
 
 
 async def main() -> None:
+    from my_handlers import handlers
+
+    jobs = SuperJobs(broker=NatsBroker("nats://localhost:4222"), handlers=handlers)
+    await jobs.serve()
+```
+
+Define `handlers` once in a shared module using `HandlerCatalog` (see
+[docs/api.md](docs/api.md) and [examples/cli_registration/](examples/cli_registration/)).
+Legacy inline registration remains available:
+
+```python
+async def main_legacy() -> None:
     jobs = SuperJobs(broker=NatsBroker("nats://localhost:4222"))
     register_handlers(jobs)
-    await jobs.start()
-    try:
-        await asyncio.Event().wait()  # keep the runtime alive for NATS consumers
-    finally:
-        await jobs.stop()
+    await jobs.serve()
 
 
 def register_handlers(jobs: SuperJobs) -> None:
@@ -87,10 +95,6 @@ def register_handlers(jobs: SuperJobs) -> None:
     ) -> ManifestResult:
         await context.emit(ManifestEvent(stage="validated"))
         return ManifestResult(revision=f"{request.device_id}-r1")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
 ```
 
 Handlers **must** take `JobContext`. Jobs without a request use `(context,) -> ...`.
@@ -169,8 +173,9 @@ pip install -e ".[cli]"
 ```
 
 Applications register contract Jobs on `JobCLI`, expose their own console entry
-point (for example `myapp = "myapp.cli:main"`), and own NATS or in-memory runtime
-factories. The library does not ship a global `superjobs` executable.
+point (for example `myapp = "myapp.cli:main"`), and configure a NATS URL for remote
+submission. Custom runtime factories remain available. The library does not ship
+a global `superjobs` executable.
 
 | Command | Needs broker | Worker for execution |
 | --- | --- | --- |

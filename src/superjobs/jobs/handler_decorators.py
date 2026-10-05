@@ -89,6 +89,7 @@ class _RuntimeBinding:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        cli: str | Any | None = None,
     ) -> None:
         self._superjobs = superjobs
         self._job = job
@@ -96,6 +97,7 @@ class _RuntimeBinding:
         self._retry = retry
         self._observation_policy = observation_policy
         self._heartbeat_interval = heartbeat_interval
+        self._cli = cli
 
     def _bind(self, callback: Callable[..., Any]) -> None:
         self._superjobs._register_handler(
@@ -105,6 +107,7 @@ class _RuntimeBinding:
             retry=self._retry,
             observation_policy=self._observation_policy,
             heartbeat_interval=self._heartbeat_interval,
+            cli=self._cli,
         )
 
 

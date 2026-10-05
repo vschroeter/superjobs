@@ -27,6 +27,7 @@ EXAMPLE_ROOT = REPO_ROOT / "examples" / "contract_interface"
 CLI_EXAMPLE_SRC = EXAMPLE_ROOT / "superjobs_contract_cli_example"
 WORKER_EXAMPLE_SRC = EXAMPLE_ROOT / "superjobs_contract_worker_example"
 WORKER_RESOURCES_SRC = EXAMPLE_ROOT / "superjobs_contract_worker_resources"
+HANDLERS_EXAMPLE_SRC = EXAMPLE_ROOT / "superjobs_contract_handlers"
 SUPPORT = Path(__file__).resolve().parent / "cli_process_support"
 ORIGIN_PROBE = Path(__file__).resolve().parent / "cli_origin_probe.py"
 WHEEL_ORIGIN_PROBE = Path(__file__).resolve().parent / "wheel_origin_probe.py"
@@ -103,6 +104,7 @@ class CliProcessError(Exception):
 class WheelBundle:
     library: Path
     contract: Path
+    handlers: Path
     cli_example: Path
     worker_example: Path
     worker_resources: Path
@@ -176,6 +178,8 @@ LOCAL_SCENARIOS: tuple[str, ...] = (
     "local_fail_handler",
     "local_invalid_before_submit",
     "local_interrupt_gate",
+    "local_catalog_provider",
+    "help_no_provider",
 )
 
 REMOTE_SCENARIOS: tuple[str, ...] = (
@@ -188,6 +192,9 @@ REMOTE_SCENARIOS: tuple[str, ...] = (
     "remote_fail_terminal",
     "remote_unavailable_broker",
     "remote_invalid_before_submit",
+    "remote_nats_url_override",
+    "worker_serve_cooperative_stop",
+    "worker_serve_interrupt",
     "control_worker_readiness_timeout",
     "control_broken_worker_launch",
 )
@@ -215,24 +222,28 @@ def build_example_wheels(work_dir: Path) -> WheelBundle:
     dist = work_dir / "dist"
     cli_build = _copy_build_example(CLI_EXAMPLE_SRC, work_dir, "cli_pkg")
     worker_build = _copy_build_example(WORKER_EXAMPLE_SRC, work_dir, "worker_pkg")
+    handlers_build = _copy_build_example(HANDLERS_EXAMPLE_SRC, work_dir, "handlers_pkg")
     resources_build = _copy_build_example(WORKER_RESOURCES_SRC, work_dir, "worker_resources_pkg")
+    run_cmd(["uv", "build", "--project", str(handlers_build), "--out-dir", str(dist)])
     run_cmd(["uv", "build", "--project", str(cli_build), "--out-dir", str(dist)])
     run_cmd(["uv", "build", "--project", str(worker_build), "--out-dir", str(dist)])
     run_cmd(["uv", "build", "--project", str(resources_build), "--out-dir", str(dist)])
     wheels = sorted(dist.glob("*.whl"))
+    handlers_wheel = next((w for w in wheels if w.name.startswith("superjobs_contract_handlers")), None)
     cli_wheel = next((w for w in wheels if w.name.startswith("superjobs_contract_cli")), None)
     worker_wheel = next((w for w in wheels if w.name.startswith("superjobs_contract_worker")), None)
     resources_wheel = next(
         (w for w in wheels if w.name.startswith("superjobs_contract_worker_resources")),
         None,
     )
-    if cli_wheel is None or worker_wheel is None or resources_wheel is None:
+    if handlers_wheel is None or cli_wheel is None or worker_wheel is None or resources_wheel is None:
         raise CliProcessError(
             f"Missing example wheels in {dist}: {[w.name for w in wheels]}",
         )
     return WheelBundle(
         library=library,
         contract=contract,
+        handlers=handlers_wheel,
         cli_example=cli_wheel,
         worker_example=worker_wheel,
         worker_resources=resources_wheel,
@@ -262,6 +273,7 @@ def create_layout_venv(
             str(py),
             f"{bundle.library}[cli]",
             str(bundle.contract),
+            str(bundle.handlers),
             str(bundle.cli_example),
             "pytest>=9.1.1",
         ]
@@ -274,6 +286,7 @@ def create_layout_venv(
             str(py),
             str(bundle.library),
             str(bundle.contract),
+            str(bundle.handlers),
             str(bundle.worker_resources),
             str(bundle.worker_example),
         ]
@@ -587,8 +600,9 @@ def _start_worker(
     nats_url: str,
     log_dir: Path,
     sync_dir: Path,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[subprocess.Popen[str], CommandRecord, TextIO, TextIO]:
-    env = _scenario_env(state_dir, sync_dir=sync_dir, nats_url=nats_url, run_id=run_id)
+    env = _scenario_env(state_dir, sync_dir=sync_dir, nats_url=nats_url, run_id=run_id, extra=extra_env)
     process, record, stdout_io, stderr_io = _spawn_logged(
         name="worker",
         command=[str(worker_entry)],
@@ -835,7 +849,7 @@ def _run_local_scenarios(
                 elif name == "local_invalid_before_submit":
                     if list(state_dir.glob("checkpoint_handler_entered*.json")):
                         raise CliProcessError("handler checkpoint must not exist before submit")
-                    assert_checkpoint_absent(state_dir, "runtime_factory_entered")
+                    assert_checkpoint_absent(state_dir, "provider_entered", gate="probe-local")
                     cmd = _run_cli(
                         entry=cli_entry,
                         args=["run", "gate-local", "--json", '{"gate": 1}'],
@@ -847,8 +861,63 @@ def _run_local_scenarios(
                     )
                     if list(state_dir.glob("checkpoint_handler_entered*.json")):
                         raise CliProcessError("handler checkpoint must not exist after validation failure")
-                    assert_checkpoint_absent(state_dir, "runtime_factory_entered")
+                    assert_checkpoint_absent(state_dir, "provider_entered", gate="probe-local")
                     record.evidence["stderr"] = cmd.stream_text()[1]
+
+                elif name == "local_catalog_provider":
+                    cmd = _run_cli(
+                        entry=cli_entry,
+                        args=["run", "probe-local", "provider-check"],
+                        env=_scenario_env(state_dir, run_id=run_id),
+                        log_dir=log_dir,
+                        name="cli",
+                        expected_code=EXIT_SUCCESS,
+                        commands=record.commands,
+                    )
+                    wait_for_checkpoint(
+                        state_dir,
+                        "provider_entered",
+                        deadline=CHECKPOINT_DEADLINE,
+                        gate="probe-local",
+                    )
+                    closed = wait_for_checkpoint(
+                        state_dir,
+                        "provider_closed",
+                        deadline=CHECKPOINT_DEADLINE,
+                        gate="probe-local",
+                    )
+                    record.evidence["provider_closed"] = closed.get("command")
+                    stdout, _ = cmd.stream_text()
+                    result = _parse_stdout_json(stdout)
+                    if not isinstance(result.get("pid"), int):
+                        raise CliProcessError("probe-local did not return a pid")
+
+                elif name == "help_no_provider":
+                    if list(state_dir.glob("checkpoint_provider_entered*.json")):
+                        raise CliProcessError("provider checkpoint exists before help")
+                    cmd = _run_cli(
+                        entry=cli_entry,
+                        args=["--help"],
+                        env=_scenario_env(state_dir),
+                        log_dir=log_dir,
+                        name="cli-help",
+                        expected_code=EXIT_SUCCESS,
+                        commands=record.commands,
+                    )
+                    submit_help = _run_cli(
+                        entry=cli_entry,
+                        args=["submit", "--help"],
+                        env=_scenario_env(state_dir / "submit-help"),
+                        log_dir=log_dir / "submit-help",
+                        name="cli-submit-help",
+                        expected_code=EXIT_SUCCESS,
+                        commands=record.commands,
+                    )
+                    if list(state_dir.glob("checkpoint_provider_entered*.json")):
+                        raise CliProcessError("provider checkpoint after root help")
+                    if list((state_dir / "submit-help").glob("checkpoint_provider_entered*.json")):
+                        raise CliProcessError("provider checkpoint after submit help")
+                    record.evidence["help_bytes"] = len(cmd.stream_text()[0]) + len(submit_help.stream_text()[0])
 
                 elif name == "local_interrupt_gate":
                     gate = "local-hold"
@@ -889,9 +958,6 @@ def _run_local_scenarios(
                         write_gate_release(state_dir, gate, run_id=run_id)
                         if not checkpoint_path(state_dir, "handler_entered", gate=gate).is_file():
                             raise CliProcessError("interrupt cleanup missing handler_entered marker")
-                        closed = wait_for_checkpoint(state_dir, "runtime_factory_closed", deadline=1)
-                        if closed.get("mode") != "local":
-                            raise CliProcessError("local factory did not finish cleanup")
                         if cmd.stream_text()[0].strip():
                             raise CliProcessError("interrupted local command wrote result stdout")
                         record.evidence["execution_id"] = entered.get("execution_id")
@@ -1295,7 +1361,7 @@ def _run_remote_scenarios(
                     elif name == "remote_invalid_before_submit":
                         isolated_sync = state_dir / "isolated-sync"
                         isolated_sync.mkdir(parents=True, exist_ok=True)
-                        assert_checkpoint_absent(isolated_sync, "runtime_factory_entered")
+                        assert_checkpoint_absent(isolated_sync, "provider_entered", gate="probe-local")
                         cmd = _run_cli(
                             entry=cli_entry,
                             args=["submit", "gate-remote", "--json", '{"gate": 1}', "--wait"],
@@ -1305,8 +1371,116 @@ def _run_remote_scenarios(
                             expected_code=EXIT_USAGE,
                             commands=record.commands,
                         )
-                        assert_checkpoint_absent(isolated_sync, "runtime_factory_entered")
+                        assert_checkpoint_absent(isolated_sync, "provider_entered", gate="probe-local")
                         continue
+
+                    elif name == "remote_nats_url_override":
+                        bad = "nats://127.0.0.1:1"
+                        cmd = _run_cli(
+                            entry=cli_entry,
+                            args=[
+                                "submit",
+                                "--nats-url",
+                                nats_url,
+                                "bundle",
+                                "url-override-bundle",
+                                "--wait",
+                            ],
+                            env=_scenario_env(
+                                state_dir,
+                                sync_dir=sync_root,
+                                nats_url=bad,
+                                extra={"SUPERJOBS_CLI_CONFIGURED_NATS_URL": bad},
+                            ),
+                            log_dir=log_dir,
+                            name="cli",
+                            expected_code=EXIT_SUCCESS,
+                            commands=record.commands,
+                        )
+                        stdout, _ = cmd.stream_text()
+                        if _parse_stdout_json(stdout) != {"accepted": True}:
+                            raise CliProcessError("nats-url override submit failed")
+
+                    elif name == "worker_serve_cooperative_stop":
+                        serve_run_id = uuid.uuid4().hex
+                        serve_state = state_dir / "serve-worker"
+                        serve_state.mkdir(parents=True, exist_ok=True)
+                        serve_process, serve_cmd, serve_out, serve_err = _start_worker(
+                            worker_entry=worker_entry,
+                            run_id=serve_run_id,
+                            state_dir=serve_state,
+                            nats_url=nats_url,
+                            log_dir=log_dir / "serve-worker",
+                            sync_dir=sync_root,
+                            extra_env={"SUPERJOBS_WORKER_LIFECYCLE": "serve"},
+                        )
+                        _append_command(record.commands, serve_cmd)
+                        try:
+                            wait_for_worker_ready(
+                                serve_state,
+                                run_id=serve_run_id,
+                                deadline=WORKER_STARTUP_DEADLINE,
+                                child_process=serve_process,
+                            )
+                            write_worker_stop(serve_state, serve_run_id)
+                            code = _reap_process(
+                                serve_process,
+                                label="serve-worker",
+                                deadline=time.monotonic() + CHILD_TIMEOUT_SECONDS,
+                                expected_code=EXIT_SUCCESS,
+                                owner=owner,
+                            )
+                            serve_cmd.exit_code = code
+                            serve_cmd.ended_at = time.monotonic()
+                            ready_marker = serve_state / "worker_ready.json"
+                            if ready_marker.is_file():
+                                raise CliProcessError("serve worker left stale readiness marker")
+                        finally:
+                            _close_streams(serve_out, serve_err)
+                        record.evidence["serve_run_id"] = serve_run_id
+
+                    elif name == "worker_serve_interrupt":
+                        serve_run_id = uuid.uuid4().hex
+                        serve_state = state_dir / "serve-interrupt"
+                        serve_state.mkdir(parents=True, exist_ok=True)
+                        serve_process, serve_cmd, serve_out, serve_err = _spawn_logged(
+                            name="serve-worker-interrupt",
+                            command=[str(worker_entry)],
+                            cwd=worker_entry.parent,
+                            env=_scenario_env(
+                                serve_state,
+                                sync_dir=sync_root,
+                                nats_url=nats_url,
+                                run_id=serve_run_id,
+                                extra={"SUPERJOBS_WORKER_LIFECYCLE": "serve"},
+                            ),
+                            log_dir=log_dir / "serve-interrupt",
+                            interruptible=True,
+                        )
+                        _append_command(record.commands, serve_cmd)
+                        try:
+                            wait_for_worker_ready(
+                                serve_state,
+                                run_id=serve_run_id,
+                                deadline=WORKER_STARTUP_DEADLINE,
+                                child_process=serve_process,
+                            )
+                            send_process_interrupt(serve_process)
+                            code = _reap_process(
+                                serve_process,
+                                label="serve-worker-interrupt",
+                                deadline=time.monotonic() + INTERRUPT_DEADLINE,
+                                expected_code=EXIT_INTERRUPTED,
+                                owner=owner,
+                            )
+                            serve_cmd.exit_code = code
+                            serve_cmd.ended_at = time.monotonic()
+                            ready = serve_state / "worker_ready.json"
+                            if ready.is_file():
+                                raise CliProcessError("interrupted serve worker left readiness marker")
+                            record.evidence["interrupt_exit"] = code
+                        finally:
+                            _close_streams(serve_out, serve_err)
 
                     elif name == "remote_fail_terminal":
                         cmd = _run_cli(

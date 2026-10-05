@@ -33,6 +33,7 @@ EXAMPLE_ROOT = REPO_ROOT / "examples" / "contract_interface"
 TYPING_ROOT = EXAMPLE_ROOT / "typing"
 CONTRACT_SRC = EXAMPLE_ROOT / "superjobs_contract_example"
 CLI_EXAMPLE_SRC = EXAMPLE_ROOT / "superjobs_contract_cli_example"
+HANDLERS_EXAMPLE_SRC = EXAMPLE_ROOT / "superjobs_contract_handlers"
 LIBRARY_SRC = REPO_ROOT / "src"
 ORIGIN_PROBE = Path(__file__).resolve().parent / "wheel_origin_probe.py"
 
@@ -64,18 +65,26 @@ TYPING_SUITES: tuple[TypingSuite, ...] = (
         "cli_observe_execution.py",
     ), False),
     TypingSuite("cli_negative", "cli_negative", ("check_types.py",), True),
+    TypingSuite("catalog_positive", "catalog_positive", ("check_types.py",), False),
+    TypingSuite("catalog_negative", "catalog_negative", ("check_types.py",), True),
 )
 
 RUNTIME_TEST_FILES = (
     REPO_ROOT / "tests" / "test_handler_registration.py",
+    REPO_ROOT / "tests" / "test_handler_catalog.py",
+    REPO_ROOT / "tests" / "test_catalog_integration.py",
+    REPO_ROOT / "tests" / "test_runtime_lifecycle.py",
+    REPO_ROOT / "tests" / "test_runtime_lifecycle_review.py",
     REPO_ROOT / "tests" / "test_public_api.py",
     REPO_ROOT / "tests" / "test_cli_public.py",
+    REPO_ROOT / "tests" / "test_nats_url_cli.py",
     REPO_ROOT / "tests" / "test_cli_input.py",
     REPO_ROOT / "tests" / "test_cli_input_contracts.py",
     REPO_ROOT / "tests" / "test_cli_local_run.py",
     REPO_ROOT / "tests" / "test_cli_remote_submit.py",
     REPO_ROOT / "tests" / "test_cli_remote_contracts.py",
     REPO_ROOT / "tests" / "test_contract_cli_example_public.py",
+    REPO_ROOT / "tests" / "test_local_run_provider_cleanup.py",
 )
 
 
@@ -344,6 +353,7 @@ def write_pyrightconfig(
             str(LIBRARY_SRC),
             str(CONTRACT_SRC / "src"),
             str(CLI_EXAMPLE_SRC / "src"),
+            str(HANDLERS_EXAMPLE_SRC / "src"),
         ]
     target.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
@@ -426,6 +436,30 @@ def build_cli_example_wheel(work_dir: Path) -> Path:
     return cli_wheel
 
 
+def build_handlers_example_wheel(work_dir: Path) -> Path:
+    dist = work_dir / "dist"
+    dist.mkdir(parents=True, exist_ok=True)
+    handlers_build = work_dir / "handlers_pkg"
+    shutil.copytree(
+        HANDLERS_EXAMPLE_SRC,
+        handlers_build,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns(".venv", "__pycache__"),
+    )
+    strip_contract_sources(handlers_build / "pyproject.toml")
+    run_cmd(["uv", "build", "--project", str(handlers_build), "--out-dir", str(dist)])
+    wheels = sorted(dist.glob("*.whl"))
+    handlers_wheel = next(
+        (w for w in wheels if w.name.startswith("superjobs_contract_handlers")),
+        None,
+    )
+    if handlers_wheel is None:
+        raise VerificationError(
+            f"Could not find handlers example wheel in {dist}: {[w.name for w in wheels]}"
+        )
+    return handlers_wheel
+
+
 def venv_python(venv_dir: Path) -> Path:
     if sys.platform == "win32":
         return venv_dir / "Scripts" / "python.exe"
@@ -453,6 +487,7 @@ def create_wheel_venv(
     contract: Path,
     *,
     cli_example: Path | None = None,
+    handlers_example: Path | None = None,
     name: str | None = None,
 ) -> Path:
     venv_dir = work_dir / (name or f"venv-py{python.replace('.', '')}")
@@ -470,6 +505,8 @@ def create_wheel_venv(
         f"{library}[cli]",
         str(contract),
     ]
+    if handlers_example is not None:
+        install.append(str(handlers_example))
     if cli_example is not None:
         install.append(str(cli_example))
     install.extend(["pytest>=9.1.1", "pytest-asyncio>=1.4.0"])
@@ -560,6 +597,7 @@ def run_runtime_tests(
     )
     for src in RUNTIME_TEST_FILES:
         shutil.copy2(src, runtime_dir / src.name)
+    shutil.copy2(REPO_ROOT / "tests" / "conftest.py", runtime_dir / "conftest.py")
     shutil.copy2(REPO_ROOT / "examples/cli_registration/main.py", runtime_dir / "cli_registration_example.py")
     merged = os.environ.copy()
     merged.pop("PYTHONPATH", None)
@@ -812,6 +850,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.mode in ("wheel", "both"):
             library, contract = build_wheels(work_dir)
+            handlers_example = build_handlers_example_wheel(work_dir)
             cli_example = build_cli_example_wheel(work_dir)
             shared_typing_venv = create_wheel_venv(
                 work_dir,
@@ -819,6 +858,7 @@ def main(argv: list[str] | None = None) -> int:
                 library,
                 contract,
                 cli_example=cli_example,
+                handlers_example=handlers_example,
                 name="venv-typing-shared",
             )
 
@@ -848,6 +888,7 @@ def main(argv: list[str] | None = None) -> int:
                         library,
                         contract,
                         cli_example=cli_example,
+                        handlers_example=handlers_example,
                     )
                 py = venv_python(venv_dir)
                 producer_only = work_dir / f"producer-only-py{py_version.replace('.', '')}"

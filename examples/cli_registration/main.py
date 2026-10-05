@@ -1,15 +1,14 @@
-"""JobCLI registration demo with JSON, field input, local run, and NATS submit (#39–#41)."""
+"""JobCLI catalog demo: shared handlers, built-in local run, NATS submit (#39–#46)."""
 
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from superjobs import InMemoryTransport, Job, JobContext, SuperJobs
-from superjobs.cli import CLIField, JobCLI
+from superjobs import CLIField, Command, HandlerCatalog, Job, JobContext
+from superjobs.cli import JobCLI
 
 
 @dataclass
@@ -48,77 +47,55 @@ MOOD_JOB = Job(
     result=GreetResult,
 )
 
-
-@asynccontextmanager
-async def local_runtime() -> AsyncIterator[SuperJobs]:
-    """Application-owned SuperJobs lifetime for local ``run`` execution."""
-    jobs = SuperJobs(transport=InMemoryTransport())
-    async with jobs:
-        yield jobs
+HANDLERS = HandlerCatalog()
 
 
-@asynccontextmanager
-async def remote_runtime() -> AsyncIterator[SuperJobs]:
-    """Application-owned SuperJobs lifetime for NATS ``submit`` execution."""
-    from faststream.nats import NatsBroker
-
-    nats_url = os.environ.get("SUPERJOBS_NATS_URL", "nats://localhost:4222")
-    jobs = SuperJobs(
-        broker=NatsBroker(
-            nats_url,
-            connect_timeout=2,
-            allow_reconnect=False,
-            max_reconnect_attempts=0,
-        ),
-    )
-    try:
-        yield jobs
-    finally:
-        if jobs.started:
-            await jobs.stop(graceful=False)
+@HANDLERS.handler(
+    GREET_JOB,
+    cli=Command(
+        name="greet",
+        positional_fields=("name",),
+        field_options={"name": CLIField(help="Name to greet.")},
+    ),
+)
+async def greet_local(
+    request: GreetRequest,
+    context: JobContext[None],
+) -> GreetResult:
+    return GreetResult(message=f"hello, {request.name}")
 
 
-def build_cli() -> JobCLI:
-    cli = JobCLI(
-        local_runtime_factory=local_runtime,
-        remote_runtime_factory=remote_runtime,
-    )
+@HANDLERS.handler(
+    MOOD_JOB,
+    cli=Command(
+        name="greet-mood",
+        field_options={"mood": CLIField(option="tone", help="Greeting tone.")},
+    ),
+)
+async def mood_handler(request: MoodRequest, context: JobContext[None]) -> GreetResult:
+    prefix = "hi" if request.mood is Mood.CHEERFUL else "hello"
+    message = f"{prefix}, {request.name}"
+    return GreetResult(message=message.upper() if request.excited else message)
 
-    async def greet_local(
+
+def _greet_lazy_factory() -> Callable[
+    [GreetRequest, JobContext[None]],
+    Awaitable[GreetResult],
+]:
+    async def lazy(
         request: GreetRequest,
         context: JobContext[None],
     ) -> GreetResult:
-        return GreetResult(message=f"hello, {request.name}")
+        return GreetResult(message=f"lazy hello, {request.name}")
 
-    cli.add(
-        "greet",
-        GREET_JOB,
-        handler=greet_local,
-        positional_fields=("name",),
-        field_options={"name": CLIField(help="Name to greet.")},
-    )
+    return lazy
 
-    def greet_handler_factory() -> Callable[[GreetRequest, JobContext[None]], Awaitable[GreetResult]]:
-        async def lazy(
-            request: GreetRequest,
-            context: JobContext[None],
-        ) -> GreetResult:
-            return GreetResult(message=f"lazy hello, {request.name}")
 
-        return lazy
-
-    cli.add("greet-lazy", GREET_JOB, handler_factory=greet_handler_factory)
+def build_cli() -> JobCLI:
+    configured = os.environ.get("SUPERJOBS_CLI_CONFIGURED_NATS_URL")
+    cli = JobCLI(handlers=HANDLERS, nats_url=configured)
+    cli.add("greet-lazy", GREET_JOB, handler_factory=_greet_lazy_factory)
     cli.add("greet-remote", GREET_JOB, remote_only=True)
-
-    async def mood_handler(request: MoodRequest, context: JobContext[None]) -> GreetResult:
-        prefix = "hi" if request.mood is Mood.CHEERFUL else "hello"
-        message = f"{prefix}, {request.name}"
-        return GreetResult(message=message.upper() if request.excited else message)
-
-    cli.add(
-        "greet-mood", MOOD_JOB, handler=mood_handler,
-        field_options={"mood": CLIField(option="tone", help="Greeting tone.")},
-    )
     return cli
 
 

@@ -22,6 +22,7 @@ the checkout is recommended):
 ```powershell
 uv build --project . --out-dir $env:TEMP\superjobs-wheels
 uv build --project examples/contract_interface/superjobs_contract_example --out-dir $env:TEMP\superjobs-wheels
+uv build --project examples/contract_interface/superjobs_contract_handlers --out-dir $env:TEMP\superjobs-wheels
 uv build --project examples/contract_interface/superjobs_contract_cli_example --out-dir $env:TEMP\superjobs-wheels
 uv build --project examples/contract_interface/superjobs_contract_worker_resources --out-dir $env:TEMP\superjobs-wheels
 uv build --project examples/contract_interface/superjobs_contract_worker_example --out-dir $env:TEMP\superjobs-wheels
@@ -130,10 +131,14 @@ Applications expose `build_cli() -> JobCLI` and a console entry point
 `bundle` demonstrates a **positional** contract field (`bundle_id`). See [cli.md](../cli.md)
 for input forms, factories, and lifecycle rules.
 
-Runtime factories in `superjobs_contract_cli_example.main`:
-
-- `local_runtime()` — `SuperJobs(transport=InMemoryTransport())`
-- `remote_runtime()` — `SuperJobs(broker=NatsBroker(SUPERJOBS_NATS_URL, ...))`
+Handler definitions live in the installable
+`superjobs-contract-handlers` package (`CONTRACT_CATALOG`). The CLI builds
+`JobCLI(handlers=CONTRACT_CATALOG, nats_url=...)` and uses the built-in remote
+producer runtime (no application `remote_runtime_factory`). Optional constructor
+URL comes from `SUPERJOBS_CLI_CONFIGURED_NATS_URL` in verification layouts.
+The worker uses the same catalog with `SuperJobs(..., handlers=CONTRACT_CATALOG)`
+and application readiness/stop markers; `SUPERJOBS_WORKER_LIFECYCLE=serve`
+exercises `jobs.serve()` for process verification.
 
 ## Reference recovery (installed example)
 
@@ -180,8 +185,11 @@ logs, origin probes). Each invocation uses a fresh `run-<uuid>` evidence directo
 to prevent marker reuse. Work directories use OS temp prefixes
 `superjobs-cli-process-*`.
 
-Measured **#42** matrix (18 scenarios × four platform/interpreter cells, seven
-integration stages, 20 real-NATS pytest cases per cell): [verification.md](../verification.md#42--installed-application-matrix-2026-10-04-current).
+Current matrix (23 scenarios per Python runtime in
+`tools/verify_cli_process.py`, including catalog provider cleanup, built-in
+`submit --nats-url` override, and `serve()` worker lifetime): run the verifier
+and record artifacts under `dist/verification/cli-process/` before citing counts
+in [verification.md](../verification.md).
 
 ### Limitations (measured, not hidden)
 

@@ -50,6 +50,7 @@ def collect_cli_evidence(repo_root: Path) -> dict[str, Any]:
     packages = [
         validate_package_origin("superjobs", site_roots, repo_root=repo_root),
         validate_package_origin("superjobs_contract_example", site_roots, repo_root=repo_root),
+        validate_package_origin("superjobs_contract_handlers", site_roots, repo_root=repo_root),
         validate_package_origin("superjobs_contract_cli_example", site_roots, repo_root=repo_root),
     ]
     _assert_not_importable("superjobs_contract_worker_example")
@@ -99,6 +100,7 @@ def collect_worker_evidence(repo_root: Path) -> dict[str, Any]:
     packages = [
         validate_package_origin("superjobs", site_roots, repo_root=repo_root),
         validate_package_origin("superjobs_contract_example", site_roots, repo_root=repo_root),
+        validate_package_origin("superjobs_contract_handlers", site_roots, repo_root=repo_root),
         validate_package_origin("superjobs_contract_worker_example", site_roots, repo_root=repo_root),
         validate_package_origin("superjobs_contract_worker_resources", site_roots, repo_root=repo_root),
     ]
@@ -106,7 +108,7 @@ def collect_worker_evidence(repo_root: Path) -> dict[str, Any]:
     _assert_not_importable("typer")
     missing_extra = collect_core_without_typer(repo_root)
 
-    from superjobs_contract_worker_example import register_contract_handlers  # noqa: F401
+    from superjobs_contract_handlers import CONTRACT_CATALOG  # noqa: F401
     from superjobs_contract_worker_resources import WORKER_RESOURCE_TOKEN  # noqa: F401
 
     import superjobs  # noqa: F401
