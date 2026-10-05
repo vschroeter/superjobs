@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import enum
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,6 +25,12 @@ from superjobs.payload.codec.implementations.msgpack import MsgpackCodec
 from superjobs.payload.codec.payloadcodec import PayloadCodec
 
 pytestmark = pytest.mark.usefixtures("stub_builtin_remote_runtime")
+
+_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _help_plaintext(stdout: str) -> str:
+    return _ANSI_SGR_RE.sub("", stdout)
 
 
 @dataclass
@@ -143,8 +150,9 @@ def test_nested_request_json_only_help() -> None:
     runner = CliRunner()
     help_result = runner.invoke(cli.build_typer(), ["submit", "nested", "--help"])
     assert help_result.exit_code == 0
-    assert "--json" in help_result.stdout
-    assert "--nested" not in help_result.stdout
+    help_text = _help_plaintext(help_result.stdout)
+    assert "--json" in help_text
+    assert "--nested" not in help_text
     json_ok = runner.invoke(
         cli.build_typer(),
         ["submit", "nested", "--json", '{"nested": {"a": 1}}'],

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any
@@ -19,6 +20,12 @@ from superjobs.payload.codec.payloadcodec import PayloadCodec
 
 
 _DEFAULT_SCHEMA = object()
+
+_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _help_plaintext(stdout: str) -> str:
+    return _ANSI_SGR_RE.sub("", stdout)
 
 
 class RecordingAdapter:
@@ -302,9 +309,10 @@ def test_unsupported_shapes_are_command_wide_json_only(schema: Any, tree: Any) -
         invoke(cli, mode, ["--json", json.dumps(tree)])
         invoke(cli, mode, [], 2)
         help_result = CliRunner().invoke(cli.build_typer(), [mode, "probe", "--help"])
-        assert "--json" in help_result.stdout
-        assert "--name" not in help_result.stdout
-        assert "--value" not in help_result.stdout
+        help_text = _help_plaintext(help_result.stdout)
+        assert "--json" in help_text
+        assert "--name" not in help_text
+        assert "--value" not in help_text
     assert recorder.loaded == [tree, tree]
 
 
