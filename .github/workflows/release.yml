@@ -3,13 +3,22 @@ name: release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to validate, build, and publish (e.g. v0.1.0)
+        required: true
+        type: string
 
 permissions:
   contents: read
   actions: read
 
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
 concurrency:
-  group: release-${{ github.event.release.tag_name }}
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
   cancel-in-progress: false
 
 jobs:
@@ -25,7 +34,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v5
@@ -36,7 +45,7 @@ jobs:
       - name: Resolve release metadata
         id: meta
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
         shell: bash
         run: |
           set -euo pipefail
@@ -54,13 +63,20 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Require release commit on main
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
           RELEASE_SHA="$(git rev-parse HEAD)"
-          if [ "${RELEASE_SHA}" != "${{ github.sha }}" ]; then
-            echo "Tagged commit ${RELEASE_SHA} does not match workflow SHA ${{ github.sha }}."
-            exit 1
+          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+            if [ "${RELEASE_SHA}" != "${GITHUB_SHA}" ]; then
+              echo "Tagged commit ${RELEASE_SHA} does not match workflow SHA ${GITHUB_SHA}."
+              exit 1
+            fi
+          else
+            echo "workflow_dispatch: using RELEASE_SHA=${RELEASE_SHA} (workflow ref SHA is ${GITHUB_SHA})."
           fi
           git fetch origin main
           if ! git merge-base --is-ancestor "${RELEASE_SHA}" origin/main; then
@@ -111,7 +127,11 @@ jobs:
           set -euo pipefail
           test -f "dist/${SDIST_NAME}"
           test -f "dist/${WHEEL_NAME}"
-          unexpected="$(find dist -mindepth 1 -maxdepth 1 -type f ! -name "${SDIST_NAME}" ! -name "${WHEEL_NAME}" -print)"
+          unexpected="$(find dist -mindepth 1 -maxdepth 1 -type f \
+            ! -name "${SDIST_NAME}" \
+            ! -name "${WHEEL_NAME}" \
+            ! -name ".gitignore" \
+            -print)"
           if [ -n "${unexpected}" ]; then
             echo "Unexpected files in dist/:"
             echo "${unexpected}"

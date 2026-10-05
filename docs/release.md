@@ -42,3 +42,22 @@ unzip -l dist/superjobs-0.1.0-py3-none-any.whl | head
 
 Re-run or fix CI on the release commit before publishing if gates are missing, pending,
 or failed. The release workflow fails closed rather than bypassing checks.
+
+## Retry PyPI publish for an existing tag (no tag or release mutation)
+
+If a **published** GitHub Release already points at the correct annotated tag and
+commit, but the release workflow failed before PyPI upload (for example after
+`uv build` wrote `dist/.gitignore`), **do not** move, delete, or recreate the tag or
+release. Re-run the same gates and publish path against that tag:
+
+```bash
+gh workflow run release.yml --ref main -f tag=v0.1.0
+```
+
+- **`--ref main`** runs the workflow definition from `main` (including any release
+  tooling fixes) while checking out the **existing** tag named in `-f tag=…`.
+- On `workflow_dispatch`, the workflow SHA may differ from the tagged commit; gates
+  still use `RELEASE_SHA` from the checked-out tag (`main` ancestry and successful
+  latest `checks` push run on that SHA).
+- On `release: published`, the tagged commit must still match `github.sha` as before.
+- Concurrency groups by the resolved tag so retries for the same version do not overlap.
