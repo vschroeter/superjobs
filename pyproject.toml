@@ -1,12 +1,15 @@
 [project]
 name = "superjobs"
 version = "0.1.0"
-description = "Add your description here"
+description = "Pre-alpha typed asynchronous jobs over NATS JetStream with shared contract packages for producers and workers."
 readme = "README.md"
 authors = [
     { name = "Valentin Schröter", email = "valentin@kunstkabinett-ton-in-ton.de" }
 ]
 requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+]
 dependencies = [
     "faststream[nats]>=0.7.4",
     "msgpack>=1.2.1",
@@ -17,6 +20,12 @@ dependencies = [
 cli = [
     "typer>=0.27.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/vschroeter/superjobs"
+Documentation = "https://github.com/vschroeter/superjobs/tree/main/docs"
+Repository = "https://github.com/vschroeter/superjobs"
+Issues = "https://github.com/vschroeter/superjobs/issues"
 
 [build-system]
 requires = ["uv_build>=0.11.21,<0.12.0"]

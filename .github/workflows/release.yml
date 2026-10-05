@@ -1,0 +1,164 @@
+name: release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate-and-build:
+    name: release / validate and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      project_version: ${{ steps.meta.outputs.project_version }}
+      sdist_name: ${{ steps.meta.outputs.sdist_name }}
+      wheel_name: ${{ steps.meta.outputs.wheel_name }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve release metadata
+        id: meta
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG}"
+          version="$(uv run --no-project --python 3.12 python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          expected_tag="v${version}"
+          if [ "${tag}" != "${expected_tag}" ]; then
+            echo "Release tag ${tag} does not match pyproject.toml version ${version} (expected tag ${expected_tag})."
+            exit 1
+          fi
+          {
+            echo "project_version=${version}"
+            echo "sdist_name=superjobs-${version}.tar.gz"
+            echo "wheel_name=superjobs-${version}-py3-none-any.whl"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Require release commit on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_SHA="$(git rev-parse HEAD)"
+          if [ "${RELEASE_SHA}" != "${{ github.sha }}" ]; then
+            echo "Tagged commit ${RELEASE_SHA} does not match workflow SHA ${{ github.sha }}."
+            exit 1
+          fi
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${RELEASE_SHA}" origin/main; then
+            echo "Release commit ${RELEASE_SHA} is not contained in main."
+            exit 1
+          fi
+
+      - name: Require successful checks workflow on release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_SHA="$(git rev-parse HEAD)"
+          run_id="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/checks.yml/runs?head_sha=${RELEASE_SHA}&branch=main&event=push&per_page=100" \
+            --jq '.workflow_runs | sort_by(.created_at) | last | if .status == "completed" and .conclusion == "success" then .id else empty end')"
+          if [ -z "${run_id}" ]; then
+            echo "No successful checks workflow run (push to main) for commit ${RELEASE_SHA}."
+            exit 1
+          fi
+          echo "Using checks workflow run id=${run_id}"
+          required_jobs=("checks / fast" "checks / integration")
+          for job_name in "${required_jobs[@]}"; do
+            status="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100" \
+              --jq "[.jobs[] | select(.name == \"${job_name}\")] | first | .status // \"\"")"
+            conclusion="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100" \
+              --jq "[.jobs[] | select(.name == \"${job_name}\")] | first | .conclusion // \"\"")"
+            if [ -z "${status}" ]; then
+              echo "Missing required job in checks run ${run_id}: ${job_name}"
+              exit 1
+            fi
+            if [ "${status}" != "completed" ] || [ "${conclusion}" != "success" ]; then
+              echo "Required job not successful: ${job_name} (status=${status}, conclusion=${conclusion})"
+              exit 1
+            fi
+            echo "OK: ${job_name}"
+          done
+
+      - name: Build sdist and wheel
+        run: uv build --no-sources
+
+      - name: Assert expected distribution files
+        shell: bash
+        env:
+          SDIST_NAME: ${{ steps.meta.outputs.sdist_name }}
+          WHEEL_NAME: ${{ steps.meta.outputs.wheel_name }}
+        run: |
+          set -euo pipefail
+          test -f "dist/${SDIST_NAME}"
+          test -f "dist/${WHEEL_NAME}"
+          unexpected="$(find dist -mindepth 1 -maxdepth 1 -type f ! -name "${SDIST_NAME}" ! -name "${WHEEL_NAME}" -print)"
+          if [ -n "${unexpected}" ]; then
+            echo "Unexpected files in dist/:"
+            echo "${unexpected}"
+            exit 1
+          fi
+
+      - name: Validate distributions with twine
+        env:
+          SDIST_NAME: ${{ steps.meta.outputs.sdist_name }}
+          WHEEL_NAME: ${{ steps.meta.outputs.wheel_name }}
+        run: uv tool run twine check --strict "dist/${SDIST_NAME}" "dist/${WHEEL_NAME}"
+
+      - name: Upload distributions for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypi-distributions-${{ steps.meta.outputs.project_version }}
+          path: |
+            dist/${{ steps.meta.outputs.sdist_name }}
+            dist/${{ steps.meta.outputs.wheel_name }}
+          if-no-files-found: error
+
+  publish:
+    name: release / publish
+    runs-on: ubuntu-latest
+    needs: validate-and-build
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: pypi-distributions-${{ needs.validate-and-build.outputs.project_version }}
+          path: dist
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          SDIST_NAME: ${{ needs.validate-and-build.outputs.sdist_name }}
+          WHEEL_NAME: ${{ needs.validate-and-build.outputs.wheel_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${UV_PUBLISH_TOKEN}" ]; then
+            echo "Repository secret PYPI_API_TOKEN is not configured."
+            exit 1
+          fi
+          uv publish "dist/${SDIST_NAME}" "dist/${WHEEL_NAME}"

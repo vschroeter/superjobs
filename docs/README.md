@@ -9,13 +9,15 @@ Pre-alpha typed jobs over NATS JetStream. Start with the repository
 | [cli.md](cli.md) | Optional Typer CLI: registration, input, local `run`, remote `submit` |
 | [payload-validation.md](payload-validation.md) | Strict boundary behavior and adapter policy |
 | [development.md](development.md) | Canonical `dev_check`, CI matrix, runner index |
+| [release.md](release.md) | Manual PyPI release gates and maintainer procedure |
 | [design/cli-application.md](design/cli-application.md) | Installed CLI/worker wheels, process proof, reference recovery example |
 | [verification.md](verification.md) | Dated measured results and limitations |
 | [adr/](adr/README.md) | Accepted decisions with issue links |
 
 Domain vocabulary: [CONTEXT.md](../CONTEXT.md) (not duplicated here). Current
-product docs track branch **`feature/cli`**; hosted CI at **`api_design` /
-`04f24f2`** predates the CLI integration stage (see [verification.md](verification.md)).
+product docs track branch **`main`**. Older dated evidence (for example hosted CI at
+**`api_design` / `04f24f2`** predating the CLI integration stage) remains in
+[verification.md](verification.md) and linked historical records.
 
 Follow-up work is tracked on GitHub (for example
 [Wayfinder #28](https://github.com/vschroeter/superjobs/issues/28),
