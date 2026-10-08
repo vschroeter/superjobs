@@ -575,5 +575,3 @@ async def test_disabled_discovery_does_not_touch_registry() -> None:
     finally:
         await disabled.stop()
         await shared.stop()
-
-
