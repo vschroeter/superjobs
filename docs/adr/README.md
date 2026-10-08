@@ -12,5 +12,7 @@ status and measured proofs are separated in [api.md](../api.md) and
 | [0004](0004-test-foundation-and-bounded-recovery.md) | Reliable test foundation and bounded recovery scope |
 | [0005](0005-broker-outage-retry-and-optional-stress.md) | Broker outage, retry windows, optional stress/performance |
 | [0006](0006-sync-producer-convenience.md) | Sync producer convenience direction |
+| [0007](0007-job-bound-worker-capability-typing.md) | Job-bound worker capability typing |
+| [0008](0008-live-job-discovery-and-raw-inspection.md) | Live Job discovery and raw inspection |
 
 Wayfinder map: [issue #28](https://github.com/vschroeter/superjobs/issues/28).

@@ -9,7 +9,11 @@ Write all file outputs and GitHub issue titles, bodies, and comments in English,
 regardless of the language used in user instructions or chat replies. Chat replies
 may follow the user's language, including German.
 
-The current design is open to change. Read `CONTEXT.md` for domain terminology.
+The current design is open to change. Read `GLOSSARY.md` for domain terminology.
+Keep `GLOSSARY.md` limited to context-specific terms and definitions; record accepted
+architectural choices in `docs/adr/` only when they are hard to reverse, surprising
+without context, and the result of a real trade-off. Keep implementation status and
+measured evidence in the relevant guides and verification records.
 Start with a shared contract package containing Job definitions and payload types,
 importable by producers without importing worker implementations.
 

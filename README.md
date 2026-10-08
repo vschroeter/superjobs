@@ -215,6 +215,6 @@ For tests without a broker, use `InMemoryTransport`; see
 [docs/development.md](docs/development.md).
 
 Further API detail: [docs/api.md](docs/api.md). Domain terms:
-[CONTEXT.md](CONTEXT.md). Checks and CI:
+[GLOSSARY.md](GLOSSARY.md). Checks and CI:
 [docs/development.md](docs/development.md). Measured results:
 [docs/verification.md](docs/verification.md).

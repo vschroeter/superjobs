@@ -36,6 +36,46 @@ _Avoid_: Exactly-once execution
 The process-level context through which applications register local handlers, submit Jobs, and manage the library lifecycle.
 _Avoid_: Job worker, Job client
 
+**Job contract**:
+The immutable definition of a Job identity and its request, result, and optional intermediate event types.
+_Avoid_: Worker capabilities, worker registration
+
+**Contract manifest**:
+The immutable shared record of a Job contract used to establish agreement between independently deployed participants.
+_Avoid_: Worker registry, worker presence
+
+**Worker instance**:
+A running SuperJobs runtime that offers one or more Job handlers under an identity shared by its handler registrations.
+_Avoid_: Permanent worker identity, host identity
+
+**Worker registration**:
+The current snapshot describing one worker instance's handler for one Job, including its presence and optional application capabilities.
+_Avoid_: Job contract, contract manifest
+
+**Worker presence**:
+A time-limited declaration that a worker instance offers an execution-ready handler for a Job.
+_Avoid_: Guaranteed availability, routing reservation
+
+**Worker capabilities**:
+Application-defined metadata describing the abilities of a worker instance's handler for a particular Job.
+_Avoid_: Job contract, resource allocation, live telemetry
+
+**Worker capability type**:
+The application-defined structure of capability snapshots associated with a Job, shared by producers and workers independently of a worker instance's current capability values.
+_Avoid_: Worker capabilities, Job request type, Job contract
+
+**Raw worker capabilities**:
+An uninterpreted worker capability payload accompanied by its data-format information, available for inspection without the application's capability type.
+_Avoid_: Typed worker capabilities, validated application capabilities
+
+**Worker discovery**:
+Reading worker registrations to find instances currently offering a Job and inspect their declared capabilities.
+_Avoid_: Job routing, scheduling, contract agreement
+
+**Offered Job**:
+A Job identified by at least one worker registration whose ready presence is currently valid.
+_Avoid_: Known contract, locally registered Job, guaranteed availability
+
 **Worker concurrency**:
 The number of different Job executions a SuperJobs runtime may process at the same time within the automatically load-balanced pool for a Job; a value of one requires the current Attempt to finish before another request is consumed.
 _Avoid_: Consumer group, attempt concurrency

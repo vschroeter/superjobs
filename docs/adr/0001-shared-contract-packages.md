@@ -24,7 +24,7 @@ Coupling producers to worker modules breaks versioning and deployment independen
 ## Rationale
 
 Shared contracts mirror telemetry/manifest integration patterns in the domain model
-([CONTEXT.md](../../CONTEXT.md)) while keeping transport details inside SuperJobs.
+([GLOSSARY.md](../../GLOSSARY.md)) while keeping transport details inside SuperJobs.
 Mandatory context carries logging, progress, events, and cancellation consistently.
 
 ## Consequences
