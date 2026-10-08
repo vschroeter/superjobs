@@ -90,6 +90,7 @@ class _RuntimeBinding:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Any | None = None,
+        capabilities: Any | None = None,
     ) -> None:
         self._superjobs = superjobs
         self._job = job
@@ -98,6 +99,7 @@ class _RuntimeBinding:
         self._observation_policy = observation_policy
         self._heartbeat_interval = heartbeat_interval
         self._cli = cli
+        self._capabilities = capabilities
 
     def _bind(self, callback: Callable[..., Any]) -> None:
         self._superjobs._register_handler(
@@ -108,6 +110,7 @@ class _RuntimeBinding:
             observation_policy=self._observation_policy,
             heartbeat_interval=self._heartbeat_interval,
             cli=self._cli,
+            capabilities=self._capabilities,
         )
 
 

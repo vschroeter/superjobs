@@ -129,3 +129,17 @@ CLI_FAIL_JOB = Job(
     result=None,
     event=None,
 )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LocaleCapability:
+    locale: str
+
+
+LOCALE_DISCOVERY_JOB = Job(
+    "examples.contract.discovery.locale",
+    version="v1",
+    request=ManifestRequest,
+    result=ManifestResult,
+    capabilities=LocaleCapability,
+)

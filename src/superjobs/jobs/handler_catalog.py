@@ -16,13 +16,21 @@ from superjobs.jobs.handler_binding import (
     validate_handler_signature,
 )
 from superjobs.jobs.handler_command import Command, normalize_command
-from superjobs.jobs.job import Job, NoRequestJob, RequestJob
+from superjobs.jobs.capability_input import CapabilityInput
+from superjobs.jobs.job import (
+    CapabilityNoRequestJob,
+    CapabilityRequestJob,
+    Job,
+    NoRequestJob,
+    RequestJob,
+)
 from superjobs.jobs.job_context import JobContext, ObservationPolicy
 from superjobs.jobs.retry_policy import RetryPolicy
 
 ReqT = TypeVar("ReqT")
 FinalT = TypeVar("FinalT")
 InterT = TypeVar("InterT")
+CapT = TypeVar("CapT")
 ConstructorP = ParamSpec("ConstructorP")
 
 _ProviderCallback = Callable[..., Any]
@@ -81,6 +89,7 @@ class HandlerBinding:
     observation_policy: ObservationPolicy | None
     heartbeat_interval: float | None
     cli: Command | None
+    capabilities: Any | None = None
 
     def __post_init__(self) -> None:
         if self.callback is None and self.provider is None:
@@ -125,6 +134,7 @@ class _CatalogBinding:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: Any | None = None,
     ) -> None:
         self._catalog = catalog
         self._job = job
@@ -133,6 +143,7 @@ class _CatalogBinding:
         self._observation_policy = observation_policy
         self._heartbeat_interval = heartbeat_interval
         self._cli = cli
+        self._capabilities = capabilities
 
     def _bind(self, callback: Callable[..., Any]) -> None:
         self._catalog._register_callback(
@@ -143,6 +154,7 @@ class _CatalogBinding:
             observation_policy=self._observation_policy,
             heartbeat_interval=self._heartbeat_interval,
             cli=self._cli,
+            capabilities=self._capabilities,
         )
 
 
@@ -167,6 +179,19 @@ class HandlerCatalog:
     @overload
     def handler(
         self,
+        job: CapabilityNoRequestJob[FinalT, InterT, CapT],
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> CatalogNoRequestHandlerDecorator[FinalT, InterT]: ...
+
+    @overload
+    def handler(
+        self,
         job: NoRequestJob[FinalT, InterT],
         *,
         concurrency: int = 1,
@@ -174,7 +199,21 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> CatalogNoRequestHandlerDecorator[FinalT, InterT]: ...
+
+    @overload
+    def handler(
+        self,
+        job: CapabilityRequestJob[ReqT, FinalT, InterT, ConstructorP, CapT],
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> CatalogHandlerDecorator[ReqT, FinalT, InterT]: ...
 
     @overload
     def handler(
@@ -186,6 +225,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> CatalogHandlerDecorator[ReqT, FinalT, InterT]: ...
 
     def handler(
@@ -197,6 +237,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: object = None,
     ) -> CatalogHandlerDecorator[Any, Any, Any] | CatalogNoRequestHandlerDecorator[Any, Any]:
         if job.request_type is None:
             return CatalogNoRequestHandlerDecorator(
@@ -207,6 +248,7 @@ class HandlerCatalog:
                 observation_policy=observation_policy,
                 heartbeat_interval=heartbeat_interval,
                 cli=cli,
+                capabilities=capabilities,
             )
         return CatalogHandlerDecorator(
             self,
@@ -216,7 +258,38 @@ class HandlerCatalog:
             observation_policy=observation_policy,
             heartbeat_interval=heartbeat_interval,
             cli=cli,
+            capabilities=capabilities,
         )
+
+    @overload
+    def register(
+        self,
+        job: CapabilityNoRequestJob[FinalT, InterT, CapT],
+        callback: Callable[[JobContext[InterT]], Coroutine[Any, Any, FinalT]],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        job: CapabilityNoRequestJob[FinalT, InterT, CapT],
+        callback: Callable[[JobContext[InterT]], FinalT],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> None: ...
 
     @overload
     def register(
@@ -230,6 +303,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> None: ...
 
     @overload
@@ -244,6 +318,37 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        job: CapabilityRequestJob[ReqT, FinalT, InterT, ConstructorP, CapT],
+        callback: Callable[[ReqT, JobContext[InterT]], Coroutine[Any, Any, FinalT]],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        job: CapabilityRequestJob[ReqT, FinalT, InterT, ConstructorP, CapT],
+        callback: Callable[[ReqT, JobContext[InterT]], FinalT],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
 
     @overload
@@ -258,6 +363,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> None: ...
 
     @overload
@@ -272,6 +378,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> None: ...
 
     @overload
@@ -339,6 +446,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: Any | None = None,
     ) -> None:
         if callback is not None:
             if not isinstance(job_or_marked, Job):
@@ -351,6 +459,7 @@ class HandlerCatalog:
                 observation_policy=observation_policy,
                 heartbeat_interval=heartbeat_interval,
                 cli=cli,
+                capabilities=capabilities,
             )
             return
 
@@ -369,7 +478,50 @@ class HandlerCatalog:
             observation_policy=observation_policy,
             heartbeat_interval=heartbeat_interval,
             cli=cli,
+            capabilities=capabilities,
         )
+
+    @overload
+    def bind(
+        self,
+        job: CapabilityNoRequestJob[FinalT, InterT, CapT],
+        /,
+        *,
+        provider: Callable[
+            [],
+            AbstractAsyncContextManager[
+                Callable[[JobContext[InterT]], FinalT]
+                | Callable[[JobContext[InterT]], Coroutine[Any, Any, FinalT]]
+            ],
+        ],
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> None: ...
+
+    @overload
+    def bind(
+        self,
+        job: CapabilityRequestJob[ReqT, FinalT, InterT, ConstructorP, CapT],
+        /,
+        *,
+        provider: Callable[
+            [],
+            AbstractAsyncContextManager[
+                Callable[[ReqT, JobContext[InterT]], FinalT]
+                | Callable[[ReqT, JobContext[InterT]], Coroutine[Any, Any, FinalT]]
+            ],
+        ],
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> None: ...
 
     @overload
     def bind(
@@ -389,6 +541,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> None: ...
 
     @overload
@@ -409,6 +562,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> None: ...
 
     def bind(
@@ -422,6 +576,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: object = None,
     ) -> None:
         self._register_provider(
             job,
@@ -431,7 +586,50 @@ class HandlerCatalog:
             observation_policy=observation_policy,
             heartbeat_interval=heartbeat_interval,
             cli=cli,
+            capabilities=capabilities,
         )
+
+    @overload
+    def bind_provider(
+        self,
+        job: CapabilityNoRequestJob[FinalT, InterT, CapT],
+        provider: Callable[
+            [],
+            AbstractAsyncContextManager[
+                Callable[[JobContext[InterT]], FinalT]
+                | Callable[[JobContext[InterT]], Coroutine[Any, Any, FinalT]]
+            ],
+        ],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> None: ...
+
+    @overload
+    def bind_provider(
+        self,
+        job: CapabilityRequestJob[ReqT, FinalT, InterT, ConstructorP, CapT],
+        provider: Callable[
+            [],
+            AbstractAsyncContextManager[
+                Callable[[ReqT, JobContext[InterT]], FinalT]
+                | Callable[[ReqT, JobContext[InterT]], Coroutine[Any, Any, FinalT]]
+            ],
+        ],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> None: ...
 
     @overload
     def bind_provider(
@@ -451,6 +649,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> None: ...
 
     @overload
@@ -471,6 +670,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> None: ...
 
     def bind_provider(
@@ -484,6 +684,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: object = None,
     ) -> None:
         """Compatibility alias for :meth:`bind`."""
         self._register_provider(
@@ -494,6 +695,7 @@ class HandlerCatalog:
             observation_policy=observation_policy,
             heartbeat_interval=heartbeat_interval,
             cli=cli,
+            capabilities=capabilities,
         )
 
     def get(self, job: Job[Any, Any, Any]) -> HandlerBinding | None:
@@ -512,6 +714,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None,
         heartbeat_interval: float | None,
         cli: str | Command | None,
+        capabilities: Any | None = None,
         attach_marker: bool = True,
     ) -> None:
         validate_handler_job_association(job, callback)
@@ -532,6 +735,7 @@ class HandlerCatalog:
             observation_policy=observation_policy,
             heartbeat_interval=heartbeat_interval,
             cli=normalized_cli,
+            capabilities=capabilities,
         )
         self._store_binding(job, binding, callback=callback, attach_marker=attach_marker)
 
@@ -545,6 +749,7 @@ class HandlerCatalog:
         observation_policy: ObservationPolicy | None,
         heartbeat_interval: float | None,
         cli: str | Command | None,
+        capabilities: Any | None = None,
     ) -> None:
         _validate_provider_factory(provider)
         normalized_cli = _prepare_registration(
@@ -563,6 +768,7 @@ class HandlerCatalog:
             observation_policy=observation_policy,
             heartbeat_interval=heartbeat_interval,
             cli=normalized_cli,
+            capabilities=capabilities,
         )
         self._store_binding(job, binding, callback=None)
 

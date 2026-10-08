@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast, overload
+from typing import Any, TypeVar, cast, overload
+
+CapT = TypeVar("CapT")
 
 from superjobs.jobs.handler_decorators import job_handler_descriptor
 from superjobs.jobs.job_identity import JobIdentity
@@ -10,6 +12,53 @@ from superjobs.registry import registry
 
 
 class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        *,
+        request: Callable[P, ReqT],
+        result: None = None,
+        event: None = None,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> RequestJob[ReqT, None, None, P]: ...
+
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        *,
+        request: Callable[P, ReqT],
+        result: None,
+        event: None = None,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> RequestJob[ReqT, None, None, P]: ...
+
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        *,
+        request: Callable[P, ReqT],
+        result: None = None,
+        event: None = None,
+        capabilities: type[CapT],
+        capability_codec: PayloadCodec[CapT] | None = None,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+    ) -> CapabilityRequestJob[ReqT, None, None, P, CapT]: ...
+
     @overload
     def __new__[**P](
         cls,
@@ -31,6 +80,23 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         name: str,
         request: Callable[P, ReqT],
         result: type[FinalT],
+        event: type[InterT],
+        *,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+        capabilities: type[CapT],
+        capability_codec: PayloadCodec[CapT] | None = None,
+    ) -> CapabilityRequestJob[ReqT, FinalT, InterT, P, CapT]: ...
+
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        request: Callable[P, ReqT],
+        result: type[FinalT],
         event: None = None,
         *,
         version: str | None = None,
@@ -39,6 +105,23 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         result_codec: PayloadCodec[FinalT] | None = None,
         event_codec: PayloadCodec[InterT] | None = None,
     ) -> RequestJob[ReqT, FinalT, None, P]: ...
+
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        request: Callable[P, ReqT],
+        result: type[FinalT],
+        event: None = None,
+        *,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+        capabilities: type[CapT],
+        capability_codec: PayloadCodec[CapT] | None = None,
+    ) -> CapabilityRequestJob[ReqT, FinalT, None, P, CapT]: ...
 
     @overload
     def __new__[**P](
@@ -61,6 +144,23 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         name: str,
         request: Callable[P, ReqT],
         result: None = None,
+        event: type[InterT] = ...,
+        *,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+        capabilities: type[CapT],
+        capability_codec: PayloadCodec[CapT] | None = None,
+    ) -> CapabilityRequestJob[ReqT, None, InterT, P, CapT]: ...
+
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        request: Callable[P, ReqT],
+        result: None = None,
         event: None = None,
         *,
         version: str | None = None,
@@ -69,6 +169,23 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         result_codec: PayloadCodec[FinalT] | None = None,
         event_codec: PayloadCodec[InterT] | None = None,
     ) -> RequestJob[ReqT, None, None, P]: ...
+
+    @overload
+    def __new__[**P](
+        cls,
+        name: str,
+        request: Callable[P, ReqT],
+        result: None = None,
+        event: None = None,
+        *,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+        capabilities: type[CapT],
+        capability_codec: PayloadCodec[CapT] | None = None,
+    ) -> CapabilityRequestJob[ReqT, None, None, P, CapT]: ...
 
     @overload
     def __new__(
@@ -92,6 +209,23 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         request: None = None,
         *,
         result: type[FinalT],
+        event: type[InterT],
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+        capabilities: type[CapT],
+        capability_codec: PayloadCodec[CapT] | None = None,
+    ) -> CapabilityNoRequestJob[FinalT, InterT, CapT]: ...
+
+    @overload
+    def __new__(
+        cls,
+        name: str,
+        request: None = None,
+        *,
+        result: type[FinalT],
         event: None = None,
         version: str | None = None,
         job_identity: JobIdentity | None = None,
@@ -99,6 +233,23 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         result_codec: PayloadCodec[FinalT] | None = None,
         event_codec: PayloadCodec[InterT] | None = None,
     ) -> NoRequestJob[FinalT, None]: ...
+
+    @overload
+    def __new__(
+        cls,
+        name: str,
+        request: None = None,
+        *,
+        result: type[FinalT],
+        event: None = None,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+        capabilities: type[CapT],
+        capability_codec: PayloadCodec[CapT] | None = None,
+    ) -> CapabilityNoRequestJob[FinalT, None, CapT]: ...
 
     @overload
     def __new__(
@@ -122,6 +273,23 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         request: None = None,
         *,
         result: None = None,
+        event: type[InterT],
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+        capabilities: type[CapT],
+        capability_codec: PayloadCodec[CapT] | None = None,
+    ) -> CapabilityNoRequestJob[None, InterT, CapT]: ...
+
+    @overload
+    def __new__(
+        cls,
+        name: str,
+        request: None = None,
+        *,
+        result: None = None,
         event: None = None,
         version: str | None = None,
         job_identity: JobIdentity | None = None,
@@ -129,6 +297,23 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         result_codec: PayloadCodec[FinalT] | None = None,
         event_codec: PayloadCodec[InterT] | None = None,
     ) -> NoRequestJob[None, None]: ...
+
+    @overload
+    def __new__(
+        cls,
+        name: str,
+        request: None = None,
+        *,
+        result: None = None,
+        event: None = None,
+        version: str | None = None,
+        job_identity: JobIdentity | None = None,
+        request_codec: PayloadCodec[ReqT] | None = None,
+        result_codec: PayloadCodec[FinalT] | None = None,
+        event_codec: PayloadCodec[InterT] | None = None,
+        capabilities: type[CapT],
+        capability_codec: PayloadCodec[CapT] | None = None,
+    ) -> CapabilityNoRequestJob[None, None, CapT]: ...
 
     def __new__(
         cls,
@@ -142,11 +327,20 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         request_codec: Any = None,
         result_codec: Any = None,
         event_codec: Any = None,
+        capabilities: Any = None,
+        capability_codec: Any = None,
     ) -> Any:
         if cls is Job:
-            target: type[Job[Any, Any, Any]] = (
-                NoRequestJob if request is None else RequestJob
-            )
+            if request is None:
+                target: type[Job[Any, Any, Any]] = (
+                    CapabilityNoRequestJob
+                    if capabilities is not None
+                    else NoRequestJob
+                )
+            else:
+                target = (
+                    CapabilityRequestJob if capabilities is not None else RequestJob
+                )
             return object.__new__(target)
         return super().__new__(cls)
 
@@ -162,6 +356,8 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         request_codec: PayloadCodec[ReqT] | None = None,
         result_codec: PayloadCodec[FinalT] | None = None,
         event_codec: PayloadCodec[InterT] | None = None,
+        capabilities: type[Any] | None = None,
+        capability_codec: PayloadCodec[Any] | None = None,
     ):
         _validate_request_presence(self, request)
         self.identity = job_identity or JobIdentity(name=name, version=version)
@@ -169,6 +365,13 @@ class Job[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         self.request_type = request
         self.result_type = result
         self.event_type = event
+        self.capability_type = capabilities
+        self.capability_codec: PayloadCodec[Any] | None = capability_codec
+        if self.capability_codec is None and capabilities is not None:
+            self.capability_codec = cast(
+                PayloadCodec[Any],
+                registry.get_payload_codec(capabilities),
+            )
 
         self.request_codec: PayloadCodec[ReqT] | None = request_codec
         if self.request_codec is None and request is not None:
@@ -255,8 +458,24 @@ class RequestJob[ReqT, FinalT, InterT, **ConstructorP](
     """Job specialization that retains the request constructor parameter specification."""
 
 
+class CapabilityRequestJob[ReqT, FinalT, InterT, **ConstructorP, CapT](
+    RequestJob[ReqT, FinalT, InterT, ConstructorP],
+):
+    """Request job with a declared application capability type."""
+
+    capability_type: type[CapT] | None
+    capability_codec: PayloadCodec[CapT] | None
+
+
 class NoRequestJob[FinalT, InterT](Job[None, FinalT, InterT]):
     """Job specialization for contracts without a request payload."""
+
+
+class CapabilityNoRequestJob[FinalT, InterT, CapT](NoRequestJob[FinalT, InterT]):
+    """No-request job with a declared application capability type."""
+
+    capability_type: type[CapT] | None
+    capability_codec: PayloadCodec[CapT] | None
 
 
 def _validate_request_presence(job: Job[Any, Any, Any], request: Any) -> None:

@@ -4,7 +4,7 @@ import asyncio
 from collections import defaultdict
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Callable
 
 from superjobs.exceptions.jobs import (
     IdempotencyConflictError,
@@ -156,6 +156,9 @@ class InMemoryTransport(JobBackend):
         observation_retention: ObservationRetention | None = None,
         result_retention: ResultRetention | None = None,
         max_result_bytes: int | None = None,
+        discovery_store: Any | None = None,
+        presence_config: Any | None = None,
+        discovery_clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.started = False
         self._owners = 0
@@ -164,6 +167,14 @@ class InMemoryTransport(JobBackend):
         if max_result_bytes is not None and max_result_bytes < 1:
             raise ValueError("max_result_bytes must be positive")
         self.max_result_bytes = max_result_bytes
+        if discovery_store is None:
+            from superjobs.discovery.memory import InMemoryDiscoveryBackend
+
+            discovery_store = InMemoryDiscoveryBackend(
+                config=presence_config,
+                clock=discovery_clock,
+            )
+        self.discovery_backend = discovery_store
         self.ack_log: list[tuple[str, int, JobState]] = []
         self.retry_log: list[tuple[str, int]] = []
         self.reject_log: list[tuple[str, int, str | None]] = []

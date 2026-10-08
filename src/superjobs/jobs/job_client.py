@@ -2,11 +2,23 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, ParamSpec, TypeVar, overload
 
+ConstructorP = ParamSpec("ConstructorP")
+CapT = TypeVar("CapT")
+
 from superjobs.exceptions.jobs import JobNotFoundError
-from superjobs.jobs.job import Job, NoRequestJob, RequestJob
+from superjobs.discovery.reader import list_worker_registrations
+from superjobs.discovery.models import WorkerRegistration
+from superjobs.jobs.job import (
+    CapabilityNoRequestJob,
+    CapabilityRequestJob,
+    Job,
+    NoRequestJob,
+    RequestJob,
+)
 from superjobs.jobs.job_handle import JobHandle
 from superjobs.jobs.submit_options import SubmitOptions
 from superjobs.jobs.submission import (
@@ -19,6 +31,7 @@ from superjobs.transport.backend import JobBackend, SubmissionOptions
 _ReqT = TypeVar("_ReqT")
 _FinalT = TypeVar("_FinalT")
 _InterT = TypeVar("_InterT")
+_CapT = TypeVar("_CapT")
 _ConstructorP = ParamSpec("_ConstructorP")
 
 
@@ -155,8 +168,21 @@ class JobClient[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         if not getattr(self.backend, "started", False):
             await self.backend.start()
 
+    async def workers(
+        self,
+        *,
+        include_stale: bool = False,
+    ) -> Sequence[WorkerRegistration[object]]:
+        return await list_worker_registrations(
+            self.backend,
+            self.job,
+            include_stale=include_stale,
+        )
 
-class RequestJobClient[ReqT, FinalT, InterT, **ConstructorP](JobClient[ReqT, FinalT, InterT]):
+
+class RequestJobClient[ReqT, FinalT, InterT, **ConstructorP](
+    JobClient[ReqT, FinalT, InterT],
+):
     @overload
     async def submit(
         self,
@@ -195,8 +221,36 @@ class RequestJobClient[ReqT, FinalT, InterT, **ConstructorP](JobClient[ReqT, Fin
     ) -> JobHandle[ReqT, FinalT, InterT]:
         return await self._submit_call(args, kwargs)
 
+    async def workers(
+        self,
+        *,
+        include_stale: bool = False,
+    ) -> Sequence[WorkerRegistration[object]]:
+        return await list_worker_registrations(
+            self.backend,
+            self.job,
+            include_stale=include_stale,
+        )
 
-class NoRequestJobClient[FinalT, InterT](JobClient[None, FinalT, InterT]):
+
+class CapabilityRequestJobClient[ReqT, FinalT, InterT, **ConstructorP, CapT](
+    RequestJobClient[ReqT, FinalT, InterT, ConstructorP],
+):
+    async def workers(
+        self,
+        *,
+        include_stale: bool = False,
+    ) -> list[WorkerRegistration[CapT]]:
+        return await list_worker_registrations(
+            self.backend,
+            self.job,
+            include_stale=include_stale,
+        )
+
+
+class NoRequestJobClient[FinalT, InterT](
+    JobClient[None, FinalT, InterT],
+):
     @overload
     async def submit(
         self,
@@ -244,12 +298,52 @@ class NoRequestJobClient[FinalT, InterT](JobClient[None, FinalT, InterT]):
     ) -> JobHandle[None, FinalT, InterT]:
         return await self._submit_call(args, kwargs)
 
+    async def workers(
+        self,
+        *,
+        include_stale: bool = False,
+    ) -> Sequence[WorkerRegistration[object]]:
+        return await list_worker_registrations(
+            self.backend,
+            self.job,
+            include_stale=include_stale,
+        )
+
+
+class CapabilityNoRequestJobClient[FinalT, InterT, CapT](
+    NoRequestJobClient[FinalT, InterT],
+):
+    async def workers(
+        self,
+        *,
+        include_stale: bool = False,
+    ) -> list[WorkerRegistration[CapT]]:
+        return await list_worker_registrations(
+            self.backend,
+            self.job,
+            include_stale=include_stale,
+        )
+
+
+@overload
+def client_for_job(
+    job: CapabilityNoRequestJob[_FinalT, _InterT, _CapT],
+    backend: JobBackend,
+) -> CapabilityNoRequestJobClient[_FinalT, _InterT, _CapT]: ...
+
 
 @overload
 def client_for_job(
     job: NoRequestJob[_FinalT, _InterT],
     backend: JobBackend,
 ) -> NoRequestJobClient[_FinalT, _InterT]: ...
+
+
+@overload
+def client_for_job(
+    job: CapabilityRequestJob[_ReqT, _FinalT, _InterT, _ConstructorP, _CapT],
+    backend: JobBackend,
+) -> CapabilityRequestJobClient[_ReqT, _FinalT, _InterT, _ConstructorP, _CapT]: ...
 
 
 @overload
@@ -270,8 +364,12 @@ def client_for_job(
     job: Job[Any, Any, Any],
     backend: JobBackend,
 ) -> JobClient[Any, Any, Any]:
+    if isinstance(job, CapabilityNoRequestJob):
+        return CapabilityNoRequestJobClient(job, backend)
     if isinstance(job, NoRequestJob):
         return NoRequestJobClient(job, backend)
+    if isinstance(job, CapabilityRequestJob):
+        return CapabilityRequestJobClient(job, backend)
     if isinstance(job, RequestJob):
         return RequestJobClient(job, backend)
     return JobClient(job, backend)

@@ -15,6 +15,8 @@ from faststream.nats.subscriber.usecases import LogicSubscriber
 from nats.js.api import KeyValueConfig
 from nats.js.errors import APIError, NoKeysError, NotFoundError
 
+from superjobs.discovery.config import PresenceConfig
+from superjobs.discovery.nats import NatsDiscoveryBackend
 from superjobs.exceptions.jobs import (
     IdempotencyConflictError,
     ObservationExpiredError,
@@ -226,9 +228,18 @@ class NatsJobBackend(JobBackend):
         self,
         broker: NatsBroker,
         queue_config: NatsQueueConfig | None = None,
+        *,
+        presence_config: PresenceConfig | None = None,
+        discovery_provision: bool = True,
     ):
         self.broker = broker
         self.queue_config = queue_config or NatsQueueConfig()
+        self.discovery_backend = NatsDiscoveryBackend(
+            broker,
+            subject_prefix=self.queue_config.subject_prefix,
+            config=presence_config,
+            discovery_provision=discovery_provision,
+        )
         self._transport = Transport(broker, self.queue_config)
         ack_wait = self.queue_config.ack_wait or 30.0
         self.heartbeat_interval = max(0.001, ack_wait / 3)
@@ -331,6 +342,7 @@ class NatsJobBackend(JobBackend):
             await asyncio.gather(*deadline_tasks, return_exceptions=True)
         self._deadline_tasks.clear()
         await self._transport.stop()
+        self.discovery_backend.invalidate()
         self.started = False
 
     async def _ensure_kv(self, bucket: str):

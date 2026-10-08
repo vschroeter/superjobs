@@ -63,9 +63,10 @@ async def wait_for_jetstream_ready(url: str, *, deadline: float) -> None:
 
 
 class OwnedNatsServer:
-    def __init__(self) -> None:
+    def __init__(self, *, extra_config: str = "") -> None:
         self.target: NatsServerTarget | None = None
         self._executable: Path | None = None
+        self._extra_config = extra_config
 
     def start(self, *, deadline: float | None = None) -> NatsServerTarget:
         if self.target is not None:
@@ -115,11 +116,14 @@ class OwnedNatsServer:
                 f"NATS launch deadline expired before startup; log: {target.log_path}",
             )
         config = target.work_dir / "server.conf"
-        config.write_text(
+        base = (
             f'host: 127.0.0.1\nport: {port}\n'
-            f'jetstream {{ store_dir: "{(target.work_dir / "store").as_posix()}" }}\n',
-            encoding="utf-8",
+            f'jetstream {{ store_dir: "{(target.work_dir / "store").as_posix()}" }}\n'
         )
+        extra = self._extra_config
+        if extra and not extra.endswith("\n"):
+            extra = f"{extra}\n"
+        config.write_text(base + extra, encoding="utf-8")
         offset = target.log_path.stat().st_size
         with target.log_path.open("ab") as log:
             target.process = subprocess.Popen(

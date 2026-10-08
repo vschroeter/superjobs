@@ -32,9 +32,10 @@ def register_callback_binding(
         default_observation_policy=runtime.observation_policy,
     )
     register_job_on_backend(runtime.transport, binding.job)
+    runtime._presence.register_handler(binding.job, binding.capabilities)
     runtime._handlers[key] = handler
     if runtime._started:
-        handler.schedule_start()
+        runtime._schedule_handler_start(handler, binding.job)
     return handler
 
 

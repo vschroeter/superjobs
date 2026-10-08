@@ -1,7 +1,7 @@
 # SuperJobs public API
 
 Current public API reference for the SuperJobs library. Domain language:
-[CONTEXT.md](../CONTEXT.md). Architectural decisions: [adr/](adr/README.md).
+[GLOSSARY.md](../GLOSSARY.md). Architectural decisions: [adr/](adr/README.md).
 Optional application CLI: [cli.md](cli.md). Runnable contracts:
 [examples/contract_interface/](../examples/contract_interface/).
 
@@ -16,6 +16,7 @@ Optional application CLI: [cli.md](cli.md). Runnable contracts:
 | Pyright **1.1.414**, `basic`, static target **3.12** on public consumer fixtures | **Measured guarantee** (not strict/mypy proof) |
 | Versioned descriptors, deterministic fingerprints, execution/manifest enforcement | **Selected, not implemented** ([#29](https://github.com/vschroeter/superjobs/issues/29), [#30](https://github.com/vschroeter/superjobs/issues/30), [Wayfinder #28](https://github.com/vschroeter/superjobs/issues/28)) |
 | Worker runtime `serve()` and `wait_until_stopped()` lifecycle helpers | **Implemented** |
+| Worker discovery (`client.workers()`, `jobs.discovery.*`), persistent presence and capability updates | **Implemented** ([#52](https://github.com/vschroeter/superjobs/issues/52), [#53](https://github.com/vschroeter/superjobs/issues/53), [#54](https://github.com/vschroeter/superjobs/issues/54)); installed crash/recovery scenarios tracked in [#55](https://github.com/vschroeter/superjobs/issues/55) |
 | Shared `HandlerCatalog`, runtime `handlers=` consumption, catalog-backed CLI | **Implemented** (issue [#46](https://github.com/vschroeter/superjobs/issues/46)) |
 | Blocking sync producer helpers with continuous runtime lifecycle | **Direction only** ([#36](https://github.com/vschroeter/superjobs/issues/36)) |
 | Dependency-sensitive strict validation guard | **Future** ([#32](https://github.com/vschroeter/superjobs/issues/32)) |
@@ -291,3 +292,78 @@ readiness. Workers keep the runtime alive while consumers process work (see
 
 `SuperJobs(transport=InMemoryTransport())` backs fast deterministic tests without
 a broker.
+
+## Worker discovery and presence
+
+Producers inspect **live worker registrations** (ready, unexpired presence
+leases) through the same validation path on the client and on
+`SuperJobs.discovery`. `InMemoryTransport` provides a shared process-local
+registry; `NatsJobBackend` stores complete registration snapshots in a dedicated
+persistent JetStream KV bucket. See [worker-discovery.md](worker-discovery.md)
+for registration, updates, deployment policy and permissions.
+
+Declare optional application capability typing on the shared Job with
+`Job(..., capabilities=LocaleCapability)`, as in the contract-only example:
+
+```python
+from superjobs import JobIdentity, SuperJobs
+from superjobs_contract_example import LOCALE_DISCOVERY_JOB
+
+async def inspect(jobs: SuperJobs) -> None:
+    workers = await jobs.client(LOCALE_DISCOVERY_JOB).workers()
+    offered = await jobs.discovery.jobs()
+    raw = await jobs.discovery.workers(
+        LOCALE_DISCOVERY_JOB.identity,
+    )
+```
+
+- `WorkerRegistration[CapT].capabilities` is `CapT | None`; `None` means the
+  worker published no capability value, not a decode failure.
+- Jobs **without** `capabilities=` never fabricate application DTOs; envelopes
+  that still carry application payloads fail with `CapabilityDecodeError`.
+- `jobs.discovery.workers(JobIdentity)` returns `list[WorkerRegistration[RawCapabilities]]`
+  for DTO-free inspection; malformed envelopes and unsupported envelope versions
+  fail visibly.
+- Snapshot reads use one evaluation time, exclude `expires_at <= now` and
+  non-`ready` state unless `include_stale=True` (diagnostics only; stale rows
+  are not offered workers).
+- Serialized registration envelopes are limited to **32 KiB** by default;
+  invalid or oversized writes leave the previous snapshot intact on replace.
+
+Share one `InMemoryDiscoveryBackend` through
+`InMemoryTransport(discovery_store=store)` when several runtimes must inspect the
+same registry. Its injectable clock makes lease boundaries deterministic. Reads
+capture a complete snapshot under the store lock; a concurrent replacement appears
+entirely before or after that snapshot. This is process-local consistency, without
+a transactional cluster-wide snapshot guarantee.
+
+`PresenceConfig` controls the envelope size, read timeout (default **30 seconds**),
+lease timeout (default **30 seconds**), renewal interval (default **10 seconds**),
+and stale retention (default **24 hours** since the last acknowledged update).
+Durations must be positive and finite; the lease must be at least three renewal
+intervals. Stale inspection stops at the retention boundary, and explicit deletion
+removes a registration immediately. Configure the shared store once so all runtimes
+use the same policy.
+
+The store exposes explicit `write_registration()` and `delete_registration()`
+operations for integration and deterministic tests. A runtime publishes its
+handlers after backend/provider readiness and capability validation, before
+consuming work. Producer-only runtimes publish no registrations. Read failures and
+timeouts raise `DiscoveryUnavailableError`; malformed envelopes raise
+`DiscoveryEnvelopeError`; invalid application payloads raise `CapabilityDecodeError`
+with worker and Job context. A successful read with no matching active entries
+returns `[]`.
+
+Keep the inferred capability-specific Job/client type to retain `CapT`. Passing it
+through an older `Job[...]` or `JobClient[...]` annotation erases that information:
+namespace queries then return `list[WorkerRegistration[object]]`, and legacy
+client queries expose `Sequence[WorkerRegistration[object]]`. The runtime still
+returns a list and validates the actual Job's declared capability type. This safe
+fallback also preserves the existing generic annotation arities.
+
+`jobs.worker(JOB)` returns a typed local handle with
+`update_capabilities(value)` and `refresh_capabilities()`. `discovery=False`
+disables automatic publication and local updates; explicit discovery reads retain
+their ordinary backend semantics. Contract fingerprint enforcement and watches
+remain separate follow-ups ([#56](https://github.com/vschroeter/superjobs/issues/56),
+[#57](https://github.com/vschroeter/superjobs/issues/57)).

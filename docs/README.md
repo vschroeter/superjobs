@@ -6,6 +6,7 @@ Pre-alpha typed jobs over NATS JetStream. Start with the repository
 | Guide | Contents |
 | --- | --- |
 | [api.md](api.md) | Public behavior, semantics, typing limits |
+| [worker-discovery.md](worker-discovery.md) | Worker leases, capability factories and local update handles |
 | [cli.md](cli.md) | Optional Typer CLI: registration, input, local `run`, remote `submit` |
 | [payload-validation.md](payload-validation.md) | Strict boundary behavior and adapter policy |
 | [development.md](development.md) | Canonical `dev_check`, CI matrix, runner index |
@@ -14,7 +15,7 @@ Pre-alpha typed jobs over NATS JetStream. Start with the repository
 | [verification.md](verification.md) | Dated measured results and limitations |
 | [adr/](adr/README.md) | Accepted decisions with issue links |
 
-Domain vocabulary: [CONTEXT.md](../CONTEXT.md) (not duplicated here). Current
+Domain vocabulary: [GLOSSARY.md](../GLOSSARY.md) (not duplicated here). Current
 product docs track branch **`main`**. Older dated evidence (for example hosted CI at
 **`api_design` / `04f24f2`** predating the CLI integration stage) remains in
 [verification.md](verification.md) and linked historical records.

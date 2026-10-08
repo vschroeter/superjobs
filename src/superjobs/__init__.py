@@ -2,6 +2,18 @@ def hello() -> str:
     return "Hello from superjobs!"
 
 
+from superjobs.discovery import (
+    CapabilityDecodeError,
+    DiscoveryError,
+    InMemoryDiscoveryBackend,
+    NoCapability,
+    PresenceConfig,
+    RawCapabilities,
+    UnsupportedDiscoveryBackendError,
+    WorkerRegistration,
+    WorkerRegistrationMetadata,
+    WorkerRegistrationState,
+)
 from superjobs.exceptions import (
     IdempotencyConflictError,
     InvalidResultError,
@@ -58,6 +70,8 @@ from superjobs.payload import (
 )
 from superjobs.jobs.handler_catalog import HandlerBinding, HandlerCatalog, HandlerCatalogSnapshot
 from superjobs.jobs.handler_command import CLIField, Command
+from superjobs.jobs.discovery_namespace import JobsDiscovery
+from superjobs.presence import LocalWorkerHandle
 from superjobs.superjobs import SuperJobs
 from superjobs.transport import (
     ExecutionRecord,
@@ -77,6 +91,8 @@ __all__ = [
     "HandlerCatalog",
     "HandlerCatalogSnapshot",
     "Backoff",
+    "CapabilityDecodeError",
+    "DiscoveryError",
     "ExponentialBackoff",
     "ExecutionRecord",
     "ExecutionStore",
@@ -84,6 +100,7 @@ __all__ = [
     "IdempotencyConflictError",
     "InvalidResultError",
     "InMemoryTransport",
+    "InMemoryDiscoveryBackend",
     "Job",
     "NoRequestJob",
     "RequestJob",
@@ -117,21 +134,30 @@ __all__ = [
     "JobState",
     "JobStatus",
     "JobSucceeded",
+    "JobsDiscovery",
+    "LocalWorkerHandle",
+    "NoCapability",
     "NatsJobBackend",
     "NatsQueueConfig",
     "NonRetryableError",
     "ObservationPolicy",
     "ObservationSink",
     "PayloadValidationError",
+    "PresenceConfig",
     "ProgressSnapshot",
     "construct_payload",
     "construct_payload_for_type",
     "validate_payload",
+    "RawCapabilities",
     "ResultExpiredError",
     "ResultRetention",
     "ResultTooLargeError",
     "RetryPolicy",
+    "UnsupportedDiscoveryBackendError",
     "SuperJobs",
+    "WorkerRegistration",
+    "WorkerRegistrationMetadata",
+    "WorkerRegistrationState",
     "submission_fingerprint",
     "hello",
 ]

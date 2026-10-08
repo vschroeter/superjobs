@@ -112,6 +112,89 @@ Repetition detail: [design/reliability-repetition-verification.md](design/reliab
 Issue [#21](https://github.com/vschroeter/superjobs/issues/21) retry-before-ack proof
 remains **optional/manual** and outside required PR closure.
 
+## Worker discovery (issue #52)
+
+Independent local verification on **2026-10-06**, Windows, CPython 3.12.11.
+
+| Check | Command (Python 3.12) | Measured on 2026-10-06 |
+| --- | --- | --- |
+| Full required gate | `uv run --python 3.12 python -m scripts.dev_check full --artifact-dir dist/issue-52/full-verification` | **All eight stages passed** |
+| Deterministic regression selection | Included in the full gate | **832 passed**, 2 skipped, 25 deselected |
+| Source and installed-wheel contract typing | Included in the full gate | Positive suites pass; negative diagnostics match exactly; **360 installed runtime tests passed** |
+| Real NATS and process verification | Included in the full gate | NATS pytest, cross-program, worker recovery, broker restart, idle outage and installed CLI stages passed |
+| Final focused discovery checks | `uv run --python 3.12 python -m pytest tests/test_discovery.py tests/test_discovery_registry.py -q` | **78 passed** |
+| Final source/wheel typing and installed runtime | `uv run --python 3.12 python tools/verify_contract_typing.py --mode both --python 3.12 --evidence dist/issue-52/final-verification` | All positive suites pass; **9** discovery negative diagnostics match exactly in both modes; wheel origins verified; **378 installed runtime tests passed** |
+
+The full gate preceded the final review corrections: sound capability typing when
+Jobs/clients are widened to legacy base annotations, and registry-key context for
+early envelope errors. The focused checks and source/wheel verification above
+cover the final implementation. Submission, NATS and lifecycle behavior were not
+changed by those final corrections.
+
+Static checks use Pyright **1.1.414**, `basic`, target **3.12**. The installed
+consumer test executes the shared contract-only discovery probe. Request-only
+constructor inference now rejects a wrong field type with `reportArgumentType`
+instead of the former generic `reportCallIssue`; the intended negative remains
+checked. Local artifacts under `dist/issue-52/` are gitignored. The full supported
+platform/interpreter matrix was not rerun for this change.
+
+**Implemented in #52:** validated registration envelopes, `RawCapabilities`,
+strict capability codecs, shared in-memory backend seam, `Job(..., capabilities=)`,
+`client.workers()`, `jobs.discovery.workers(Job|JobIdentity)`, and
+`jobs.discovery.jobs()`.
+
+**Explicitly later:** NATS KV registry ([#53](https://github.com/vschroeter/superjobs/issues/53)),
+automatic lifecycle update handles ([#54](https://github.com/vschroeter/superjobs/issues/54)),
+watches, and contract fingerprint enforcement on discovery rows.
+
+## Worker registry and lifecycle — issues #53 and #54 (2026-10-06)
+
+Independent combined verification on Windows, CPython 3.12.11:
+
+```powershell
+uv run --python 3.12 python -m scripts.dev_check full --artifact-dir dist/issues-53-54/full-verification
+```
+
+**All eight required stages passed**, with no process cleanup errors:
+
+| Check | Measured result |
+| --- | --- |
+| Deterministic pytest | 897 passed, 2 existing platform skips, 61 deselected |
+| Source and installed-wheel typing | All 14 suites passed; identical ruled negatives, including 30 worker and 9 discovery diagnostics |
+| Installed public runtime | 409 passed; package origins verified |
+| Required real NATS pytest | 56 passed, no skips |
+| Cross-program, worker recovery, broker restart, idle outage | All four stages passed |
+| Installed CLI applications | 23 scenarios passed; package origins verified |
+
+The dedicated KV registry uses file storage, history one, deployment-scoped
+retention and envelope limits. Real NATS checks cover provisioning races, policy
+rejection, permissions, late typed/raw snapshots, complete version identities,
+atomic replacement, logical lease filtering, physical TTL expiry and concurrent
+deletion. Focused registry checks also exercise bounded requests and repeated
+cancellation of owned snapshot consumers: 47 tests passed.
+
+Lifecycle checks exercise provider readiness before publication/consumption,
+factory validation and rollback, capability replacement/refresh, acknowledged
+renewal, outage recovery, missing-record recreation, generation fencing,
+discovery opt-out and removal before active Attempts finish. Eleven public
+adversarial tests are included in the installed runtime selection. They cover
+queued refresh/update/shutdown races, preservation after failed publication,
+CLI/catalog capability handoff and lazy factories, and repeated cancellation
+while a factory's async cleanup must finish before provider release.
+
+Local evidence is retained under `dist/issues-53-54/` (gitignored), including
+the full run summary and focused implementation/review records. Implementation
+was delegated to Cursor Composer 2.5; repeated targeted correction passes were
+followed by narrow Codex corrections and independent review. These are local
+results for this platform/interpreter; the complete supported matrix was not
+rerun.
+
+The existing process gates remain execution/recovery regressions. Separate
+installed producer/worker discovery with hard worker kills and persistent
+broker/process recovery is still [#55](https://github.com/vschroeter/superjobs/issues/55).
+Discovery contract agreement and watches remain separate work. Public behavior
+and deployment permissions are described in [worker-discovery.md](worker-discovery.md).
+
 ## Limitations and open questions
 
 | Topic | State |

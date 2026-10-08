@@ -85,14 +85,7 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
                 name=f"superjobs-start-{self.job.canonical_name}",
             )
 
-    async def stop(
-        self,
-        *,
-        graceful: bool = True,
-        timeout: float | None = None,
-    ) -> None:
-        if timeout is not None and timeout <= 0:
-            raise ValueError("timeout must be positive")
+    async def stop_admission(self) -> None:
         self._stop_event.set()
         subscriber = self.request_subscriber
         if subscriber is not None:
@@ -110,6 +103,20 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
             ),
             return_exceptions=True,
         )
+        self.request_subscriber = None
+        self._start_task = None
+        self._consumer_task = None
+        self._ready_event.clear()
+
+    async def stop(
+        self,
+        *,
+        graceful: bool = True,
+        timeout: float | None = None,
+    ) -> None:
+        if timeout is not None and timeout <= 0:
+            raise ValueError("timeout must be positive")
+        await self.stop_admission()
 
         active = tuple(self._active_tasks)
         if active:
@@ -127,11 +134,6 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
                     if not task.done():
                         task.cancel()
                 await asyncio.gather(*active, return_exceptions=True)
-
-        self.request_subscriber = None
-        self._start_task = None
-        self._consumer_task = None
-        self._ready_event.clear()
 
     async def wait_ready(self) -> None:
         if self._start_task is not None:

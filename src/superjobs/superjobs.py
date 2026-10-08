@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from contextlib import AsyncExitStack
 from collections.abc import Callable, Coroutine
 from typing import Any, ParamSpec, TypeVar, overload
 
 from faststream.nats import NatsBroker
+
+from superjobs.discovery.config import PresenceConfig
+from superjobs.discovery.memory import Clock
+from superjobs.presence import LocalWorkerHandle, PresenceSupervisor
 
 from superjobs.jobs.catalog_runtime import (
     close_provider_stack,
@@ -25,8 +30,17 @@ from superjobs.jobs.handler_decorators import (
     RuntimeHandlerDecorator,
     RuntimeNoRequestHandlerDecorator,
 )
-from superjobs.jobs.job import Job, NoRequestJob, RequestJob
+from superjobs.jobs.capability_input import CapabilityInput
+from superjobs.jobs.job import (
+    CapabilityNoRequestJob,
+    CapabilityRequestJob,
+    Job,
+    NoRequestJob,
+    RequestJob,
+)
 from superjobs.jobs.job_client import (
+    CapabilityNoRequestJobClient,
+    CapabilityRequestJobClient,
     JobClient,
     NoRequestJobClient,
     RequestJobClient,
@@ -37,6 +51,7 @@ from superjobs.jobs.job_handler import JobHandler
 from superjobs.jobs.retention import ObservationRetention, ResultRetention
 from superjobs.jobs.retry_policy import RetryPolicy
 from superjobs.runtime_lifecycle import ShutdownCompletion, finish_cleanup
+from superjobs.jobs.discovery_namespace import JobsDiscovery
 from superjobs.transport.backend import JobBackend
 from superjobs.transport.in_memory import InMemoryTransport
 
@@ -45,6 +60,7 @@ ReqT = TypeVar("ReqT")
 FinalT = TypeVar("FinalT")
 InterT = TypeVar("InterT")
 ConstructorP = ParamSpec("ConstructorP")
+CapT = TypeVar("CapT")
 
 
 class SuperJobs:
@@ -60,6 +76,9 @@ class SuperJobs:
         result_retention: ResultRetention | None = None,
         max_result_bytes: int | None = None,
         graceful_shutdown_timeout: float | None = None,
+        discovery: bool = True,
+        presence_config: PresenceConfig | None = None,
+        presence_clock: Clock | None = None,
     ):
         if broker is not None and transport is not None:
             raise ValueError("Pass either broker or transport, not both")
@@ -73,12 +92,18 @@ class SuperJobs:
         elif broker is not None:
             from superjobs.transport.nats_backend import NatsJobBackend
 
-            self.transport = NatsJobBackend(broker, queue_config)
+            self.transport = NatsJobBackend(
+                broker,
+                queue_config,
+                presence_config=presence_config,
+            )
         else:
             self.transport = InMemoryTransport(
                 observation_retention=observation_retention,
                 result_retention=result_retention,
                 max_result_bytes=max_result_bytes,
+                presence_config=presence_config,
+                discovery_clock=presence_clock,
             )
 
         if observation_retention is not None and hasattr(
@@ -104,12 +129,27 @@ class SuperJobs:
         self._completion: ShutdownCompletion | None = None
         self._stop_task: asyncio.Task[None] | None = None
         self._starting = False
+        self._worker_id = uuid.uuid4().hex
+        self._discovery_enabled = discovery
+        self._presence = PresenceSupervisor(
+            worker_id=self._worker_id,
+            transport=self.transport,
+            enabled=discovery,
+            presence_config=presence_config,
+            presence_clock=presence_clock,
+        )
+        self._serving_generation = 0
+        self.discovery = JobsDiscovery(self)
         if handlers is not None:
             self._consume_catalog_snapshot(handlers.snapshot())
 
     @property
     def started(self) -> bool:
         return self._started
+
+    @property
+    def worker_id(self) -> str:
+        return self._worker_id
 
     @property
     def catalog(self) -> HandlerCatalog:
@@ -133,6 +173,7 @@ class SuperJobs:
             retry=binding.retry,
             observation_policy=binding.observation_policy,
             heartbeat_interval=binding.heartbeat_interval,
+            capabilities=binding.capabilities,
             catalog_source=True,
         )
 
@@ -150,6 +191,7 @@ class SuperJobs:
                 default_observation_policy=self.observation_policy,
             )
             register_job_on_backend(self.transport, binding.job)
+            self._presence.register_handler(binding.job, binding.capabilities)
             self._handlers[binding.job.canonical_name] = handler
 
     async def _release_provider_bindings(self, errors: list[BaseException]) -> None:
@@ -161,17 +203,29 @@ class SuperJobs:
         if release_error is not None:
             errors.append(release_error)
 
-    async def _rollback_start(self, start_tasks: list[asyncio.Task[None]]) -> None:
+    async def _rollback_start(
+        self,
+        start_tasks: list[asyncio.Task[None]],
+        *,
+        serving_generation: int,
+    ) -> None:
         for task in start_tasks:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*start_tasks, return_exceptions=True)
+        presence_errors: list[BaseException] = []
+        try:
+            await self._presence.rollback_generation(serving_generation)
+        except BaseException as error:
+            presence_errors.append(error)
         errors = [
             result for result in await asyncio.gather(
                 *(handler.stop(graceful=False) for handler in self._handlers.values()),
                 return_exceptions=True,
             ) if isinstance(result, BaseException)
         ]
+        errors.extend(presence_errors)
+        await self._presence.stop_renewal()
         await self._release_provider_bindings(errors)
         try:
             await self.transport.stop()
@@ -185,17 +239,25 @@ class SuperJobs:
             await finish_cleanup(self._stop_task)
         self._starting = True
         start_tasks: list[asyncio.Task[None]] = []
+        serving_generation = 0
         try:
-            await self._activate_provider_bindings()
+            serving_generation = await self._presence.begin_serving_generation()
+            self._serving_generation = serving_generation
             await self.transport.start()
+            await self._activate_provider_bindings()
+            if self._handlers:
+                await self._presence.publish_all_initial(generation=serving_generation)
             start_tasks = [
                 asyncio.create_task(handler.start(), name=f"superjobs-handler-start-{key}")
                 for key, handler in self._handlers.items()
             ]
             if start_tasks:
                 await asyncio.gather(*start_tasks)
+            self._presence.start_renewal()
         except BaseException as error:
-            rollback = asyncio.create_task(self._rollback_start(start_tasks))
+            rollback = asyncio.create_task(
+                self._rollback_start(start_tasks, serving_generation=serving_generation),
+            )
             try:
                 await finish_cleanup(rollback)
             except BaseException as cleanup_error:
@@ -225,12 +287,33 @@ class SuperJobs:
         timeout: float | None,
     ) -> None:
         try:
+            async def _stop_admission() -> None:
+                results = await asyncio.gather(
+                    *(
+                        handler.stop_admission()
+                        for handler in self._handlers.values()
+                    ),
+                    return_exceptions=True,
+                )
+                admission_errors = [
+                    result for result in results if isinstance(result, BaseException)
+                ]
+                if admission_errors:
+                    raise BaseExceptionGroup(
+                        "Handler admission stop failed",
+                        admission_errors,
+                    )
+
+            presence_errors = await self._presence.shutdown(
+                stop_admission=_stop_admission,
+            )
             results = await asyncio.gather(
                 *(handler.stop(graceful=graceful, timeout=timeout)
                   for handler in self._handlers.values()),
                 return_exceptions=True,
             )
             errors = [result for result in results if isinstance(result, BaseException)]
+            errors.extend(presence_errors)
             if errors:
                 completion.error = errors[0]
                 for error in errors[1:]:
@@ -330,6 +413,19 @@ class SuperJobs:
     @overload
     def handler(
         self,
+        job: CapabilityNoRequestJob[FinalT, InterT, CapT],
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> RuntimeNoRequestHandlerDecorator[FinalT, InterT]: ...
+
+    @overload
+    def handler(
+        self,
         job: NoRequestJob[FinalT, InterT],
         *,
         concurrency: int = 1,
@@ -337,7 +433,21 @@ class SuperJobs:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> RuntimeNoRequestHandlerDecorator[FinalT, InterT]: ...
+
+    @overload
+    def handler(
+        self,
+        job: CapabilityRequestJob[ReqT, FinalT, InterT, ConstructorP, CapT],
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        cli: str | Command | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> RuntimeHandlerDecorator[ReqT, FinalT, InterT]: ...
 
     @overload
     def handler(
@@ -349,6 +459,7 @@ class SuperJobs:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: None = None,
     ) -> RuntimeHandlerDecorator[ReqT, FinalT, InterT]: ...
 
     def handler(
@@ -360,6 +471,7 @@ class SuperJobs:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: object = None,
     ) -> RuntimeHandlerDecorator[Any, Any, Any] | RuntimeNoRequestHandlerDecorator[Any, Any]:
         if job.request_type is None:
             return RuntimeNoRequestHandlerDecorator(
@@ -370,6 +482,7 @@ class SuperJobs:
                 observation_policy=observation_policy,
                 heartbeat_interval=heartbeat_interval,
                 cli=cli,
+                capabilities=capabilities,
             )
         return RuntimeHandlerDecorator(
             self,
@@ -379,10 +492,39 @@ class SuperJobs:
             observation_policy=observation_policy,
             heartbeat_interval=heartbeat_interval,
             cli=cli,
+            capabilities=capabilities,
         )
 
     # Compatibility alias for the original sketch while callers migrate.
     handle = handler
+
+    @overload
+    def register(
+        self,
+        job: CapabilityNoRequestJob[FinalT, InterT, CapT],
+        callback: Callable[[JobContext[InterT]], Coroutine[Any, Any, FinalT]],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        job: CapabilityNoRequestJob[FinalT, InterT, CapT],
+        callback: Callable[[JobContext[InterT]], FinalT],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> None: ...
 
     @overload
     def register(
@@ -395,6 +537,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        capabilities: None = None,
     ) -> None: ...
 
     @overload
@@ -408,6 +551,35 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        capabilities: None = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        job: CapabilityRequestJob[ReqT, FinalT, InterT, ConstructorP, CapT],
+        callback: Callable[[ReqT, JobContext[InterT]], Coroutine[Any, Any, FinalT]],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        capabilities: CapabilityInput[CapT] = None,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        job: CapabilityRequestJob[ReqT, FinalT, InterT, ConstructorP, CapT],
+        callback: Callable[[ReqT, JobContext[InterT]], FinalT],
+        /,
+        *,
+        concurrency: int = 1,
+        retry: RetryPolicy | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        heartbeat_interval: float | None = None,
+        capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
 
     @overload
@@ -421,6 +593,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        capabilities: None = None,
     ) -> None: ...
 
     @overload
@@ -434,6 +607,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        capabilities: None = None,
     ) -> None: ...
 
     @overload
@@ -495,6 +669,7 @@ class SuperJobs:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: Any | None = None,
     ) -> None:
         if callback is not None:
             if not isinstance(job_or_marked, Job):
@@ -507,6 +682,7 @@ class SuperJobs:
                 observation_policy=observation_policy,
                 heartbeat_interval=heartbeat_interval,
                 cli=cli,
+                capabilities=capabilities,
             )
             return
 
@@ -525,7 +701,32 @@ class SuperJobs:
             observation_policy=observation_policy,
             heartbeat_interval=heartbeat_interval,
             cli=cli,
+            capabilities=capabilities,
         )
+
+    @overload
+    def worker(self, job: CapabilityRequestJob[Any, Any, Any, Any, CapT]) -> LocalWorkerHandle[CapT]: ...
+
+    @overload
+    def worker(self, job: CapabilityNoRequestJob[Any, Any, CapT]) -> LocalWorkerHandle[CapT]: ...
+
+    @overload
+    def worker(self, job: RequestJob[Any, Any, Any, Any]) -> LocalWorkerHandle[None]: ...
+
+    @overload
+    def worker(self, job: NoRequestJob[Any, Any]) -> LocalWorkerHandle[None]: ...
+
+    @overload
+    def worker(self, job: Job[Any, Any, Any]) -> LocalWorkerHandle[None]: ...
+
+    def worker(self, job: Job[Any, Any, Any]) -> LocalWorkerHandle[Any]:
+        return self._presence.worker(job)
+
+    @overload
+    def client(
+        self,
+        job: CapabilityRequestJob[ReqT, FinalT, InterT, ConstructorP, CapT],
+    ) -> CapabilityRequestJobClient[ReqT, FinalT, InterT, ConstructorP, CapT]: ...
 
     @overload
     def client(
@@ -534,12 +735,27 @@ class SuperJobs:
     ) -> RequestJobClient[ReqT, FinalT, InterT, ConstructorP]: ...
 
     @overload
-    def client(self, job: NoRequestJob[FinalT, InterT]) -> NoRequestJobClient[FinalT, InterT]: ...
+    def client(
+        self,
+        job: CapabilityNoRequestJob[FinalT, InterT, CapT],
+    ) -> CapabilityNoRequestJobClient[FinalT, InterT, CapT]: ...
 
     @overload
-    def client(self, job: Job[ReqT, FinalT, InterT]) -> JobClient[ReqT, FinalT, InterT]: ...
+    def client(
+        self,
+        job: NoRequestJob[FinalT, InterT],
+    ) -> NoRequestJobClient[FinalT, InterT]: ...
 
-    def client(self, job: Job[ReqT, FinalT, InterT]) -> JobClient[ReqT, FinalT, InterT]:
+    @overload
+    def client(
+        self,
+        job: Job[ReqT, FinalT, InterT],
+    ) -> JobClient[ReqT, FinalT, InterT]: ...
+
+    def client(
+        self,
+        job: Job[ReqT, FinalT, InterT],
+    ) -> JobClient[ReqT, FinalT, InterT]:
         return client_for_job(job, self.transport)
 
     def _register_handler(
@@ -552,6 +768,7 @@ class SuperJobs:
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
+        capabilities: Any | None = None,
         catalog_source: bool = False,
     ) -> None:
         if self._starting:
@@ -596,6 +813,7 @@ class SuperJobs:
                         retry=retry,
                         observation_policy=observation_policy,
                         heartbeat_interval=heartbeat_interval,
+                        capabilities=capabilities,
                         cli=cli,
                         attach_marker=False,
                     )
@@ -611,7 +829,35 @@ class SuperJobs:
         )
 
         register_job_on_backend(self.transport, job)
+        self._presence.register_handler(job, capabilities)
 
         self._handlers[key] = handler
         if self._started:
-            handler.schedule_start()
+            self._schedule_handler_start(handler, job)
+
+    def _schedule_handler_start(
+        self,
+        handler: JobHandler[Any, Any, Any],
+        job: Job[Any, Any, Any],
+    ) -> None:
+        generation = self._serving_generation
+
+        async def _publish_then_start() -> None:
+            try:
+                if self._presence.enabled:
+                    await self._presence.publish_initial(job, generation=generation)
+                if not self._started or self._serving_generation != generation:
+                    raise RuntimeError("The runtime stopped before the handler became ready")
+                await handler.start()
+            except BaseException as error:
+                try:
+                    await self._presence.rollback_handler(job, generation=generation)
+                except BaseException as cleanup_error:
+                    error.add_note(f"Handler presence rollback also failed: {cleanup_error!r}")
+                raise
+
+        if handler._start_task is None or handler._start_task.done():
+            handler._start_task = asyncio.create_task(
+                _publish_then_start(),
+                name=f"superjobs-start-{job.canonical_name}",
+            )

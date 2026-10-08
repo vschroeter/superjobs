@@ -23,7 +23,7 @@ class PydanticRequest(BaseModel):
 async def _pydantic_constructor_rejections(jobs: SuperJobs) -> None:
     client = jobs.client(Job("probe.negative.pydantic", request=PydanticRequest))
     await client.submit()  # expect: reportCallIssue
-    await client.submit(metric=17)  # expect: reportCallIssue
+    await client.submit(metric=17)  # expect: reportArgumentType
     await client.submit(metric="cpu", unknown=True)  # expect: reportCallIssue
 
 

@@ -67,9 +67,15 @@ TYPING_SUITES: tuple[TypingSuite, ...] = (
     TypingSuite("cli_negative", "cli_negative", ("check_types.py",), True),
     TypingSuite("catalog_positive", "catalog_positive", ("check_types.py",), False),
     TypingSuite("catalog_negative", "catalog_negative", ("check_types.py",), True),
+    TypingSuite("discovery_positive", "discovery_positive", ("check_types.py",), False),
+    TypingSuite("discovery_negative", "discovery_negative", ("check_types.py",), True),
+    TypingSuite("worker_positive", "worker_positive", ("check_types.py",), False),
+    TypingSuite("worker_negative", "worker_negative", ("check_types.py",), True),
 )
 
 RUNTIME_TEST_FILES = (
+    REPO_ROOT / "tests" / "test_discovery.py",
+    REPO_ROOT / "tests" / "test_discovery_registry.py",
     REPO_ROOT / "tests" / "test_handler_registration.py",
     REPO_ROOT / "tests" / "test_handler_catalog.py",
     REPO_ROOT / "tests" / "test_catalog_integration.py",
@@ -85,6 +91,9 @@ RUNTIME_TEST_FILES = (
     REPO_ROOT / "tests" / "test_cli_remote_contracts.py",
     REPO_ROOT / "tests" / "test_contract_cli_example_public.py",
     REPO_ROOT / "tests" / "test_local_run_provider_cleanup.py",
+    REPO_ROOT / "tests" / "test_worker_presence_lifecycle.py",
+    REPO_ROOT / "tests" / "test_worker_presence_review.py",
+    REPO_ROOT / "tests" / "test_worker_import_probe.py",
 )
 
 
@@ -599,6 +608,8 @@ def run_runtime_tests(
         shutil.copy2(src, runtime_dir / src.name)
     shutil.copy2(REPO_ROOT / "tests" / "conftest.py", runtime_dir / "conftest.py")
     shutil.copy2(REPO_ROOT / "examples/cli_registration/main.py", runtime_dir / "cli_registration_example.py")
+    shutil.copy2(EXAMPLE_ROOT / "discovery_import_probe.py", runtime_dir / "discovery_import_probe.py")
+    shutil.copy2(EXAMPLE_ROOT / "worker_import_probe.py", runtime_dir / "worker_import_probe.py")
     merged = os.environ.copy()
     merged.pop("PYTHONPATH", None)
     merged.pop("PYTHONHOME", None)
