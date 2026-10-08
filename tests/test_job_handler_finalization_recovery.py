@@ -141,3 +141,29 @@ async def test_consumer_survives_failure_completion_write_and_redelivers() -> No
             follow_up.id,
             state=JobState.COMPLETED,
         )
+
+
+@pytest.mark.asyncio
+async def test_oversized_result_is_not_swallowed_by_write_completion_recovery() -> None:
+    """PR60 transport recovery must not trap ResultTooLargeError from write_completion."""
+    transport = InMemoryTransport(max_result_bytes=8)
+    jobs = SuperJobs(transport=transport)
+    job = Job(
+        "tests.finalization.result-too-large",
+        version="v1",
+        request=_Request,
+        result=_Result,
+    )
+
+    @jobs.handler(job, concurrency=1, retry=RetryPolicy(max_attempts=1))
+    async def handler(request: _Request, context) -> _Result:
+        return _Result(label="too much data")
+
+    async with jobs:
+        client = jobs.client(job)
+        handle = await client.submit(_Request(label="x"))
+        async with asyncio.timeout(2.0):
+            with pytest.raises(JobFailedError) as raised:
+                await handle.result()
+
+    assert raised.value.error.code == "result_too_large"

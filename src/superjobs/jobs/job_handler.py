@@ -10,6 +10,7 @@ from typing import Any
 from superjobs.exceptions.jobs import (
     InvalidResultError,
     JobCancelledError,
+    NonRetryableError,
     ResultTooLargeError,
 )
 from superjobs.jobs.events import (
@@ -286,6 +287,8 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
                         else None
                     ),
                 )
+            except NonRetryableError:
+                raise
             except Exception:
                 logger.exception(
                     "Unable to write completion for %s",
