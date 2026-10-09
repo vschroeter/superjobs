@@ -10,6 +10,7 @@ from typing import Any
 from superjobs.exceptions.jobs import (
     InvalidResultError,
     JobCancelledError,
+    NonRetryableError,
     ResultTooLargeError,
 )
 from superjobs.jobs.events import (
@@ -186,6 +187,12 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
             except Exception:
                 logger.exception("Unable to retry cancelled Attempt")
             raise
+        except Exception:
+            logger.exception(
+                "Delivery finalization failed for %s",
+                item.execution.job_id,
+            )
+            await self._retry_terminal_delivery(item)
         finally:
             semaphore.release()
 
@@ -197,11 +204,8 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
             JobState.FAILED,
             JobState.CANCELLED,
         }:
-            if not await self._publish_terminal_observation(execution):
-                await self._retry_terminal_delivery(item)
+            if not await self._finalize_terminal_delivery(item, execution):
                 return
-            await self.backend.signal_status(execution.job_id)
-            await item.delivery.ack()
             return
 
         if await self.backend.is_cancel_requested(execution.job_id):
@@ -272,21 +276,28 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
             except Exception as exception:
                 raise InvalidResultError(str(exception)) from exception
             await context.flush()
-            completion = await self.backend.write_completion(
-                execution,
-                state=JobState.COMPLETED,
-                result_payload=result_payload,
-                result_media_type=(
-                    self.job.result_codec.media_type
-                    if self.job.result_codec is not None
-                    else None
-                ),
-            )
-            if not await self._publish_terminal_observation(completion):
+            try:
+                completion = await self.backend.write_completion(
+                    execution,
+                    state=JobState.COMPLETED,
+                    result_payload=result_payload,
+                    result_media_type=(
+                        self.job.result_codec.media_type
+                        if self.job.result_codec is not None
+                        else None
+                    ),
+                )
+            except NonRetryableError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Unable to write completion for %s",
+                    execution.job_id,
+                )
                 await self._retry_terminal_delivery(item)
                 return
-            await self.backend.signal_status(execution.job_id)
-            await item.delivery.ack()
+            if not await self._finalize_terminal_delivery(item, completion):
+                return
         except JobCancelledError as exception:
             try:
                 await context.flush()
@@ -373,50 +384,58 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
                 datetime.now(UTC).timestamp() + delay,
                 UTC,
             )
-            await self.backend.mark_retry(
-                execution,
-                next_attempt_at=next_attempt_at,
-            )
-            if execution.state is JobState.CANCELLED:
-                if not await self._publish_terminal_observation(execution):
-                    await self._retry_terminal_delivery(item)
-                    return
-                await self.backend.signal_status(execution.job_id)
-                await item.delivery.ack()
-                return
             try:
-                await self._append_system_event(
+                await self.backend.mark_retry(
                     execution,
-                    item.attempt,
-                    JobRetryScheduled(
-                        attempt=item.attempt + 1,
-                        delay=delay,
-                    ),
+                    next_attempt_at=next_attempt_at,
+                )
+                if execution.state is JobState.CANCELLED:
+                    if not await self._finalize_terminal_delivery(item, execution):
+                        return
+                    return
+                try:
+                    await self._append_system_event(
+                        execution,
+                        item.attempt,
+                        JobRetryScheduled(
+                            attempt=item.attempt + 1,
+                            delay=delay,
+                        ),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Unable to publish retry observation for %s",
+                        execution.job_id,
+                    )
+                await item.delivery.retry(
+                    delay=timedelta(seconds=delay),
+                    attempt=item.attempt + 1,
                 )
             except Exception:
                 logger.exception(
-                    "Unable to publish retry observation for %s",
+                    "Unable to schedule retry for %s",
                     execution.job_id,
                 )
-            await item.delivery.retry(
-                delay=timedelta(seconds=delay),
-                attempt=item.attempt + 1,
-            )
+                await self._retry_terminal_delivery(item)
             return
 
         await self._complete_failure(item, error)
 
     async def _complete_failure(self, item: WorkItem, error: JobError) -> None:
-        completion = await self.backend.write_completion(
-            item.execution,
-            state=JobState.FAILED,
-            error=error,
-        )
-        if not await self._publish_terminal_observation(completion):
+        try:
+            completion = await self.backend.write_completion(
+                item.execution,
+                state=JobState.FAILED,
+                error=error,
+            )
+        except Exception:
+            logger.exception(
+                "Unable to write failure completion for %s",
+                item.execution.job_id,
+            )
             await self._retry_terminal_delivery(item)
             return
-        await self.backend.signal_status(item.execution.job_id)
-        await item.delivery.ack()
+        await self._finalize_terminal_delivery(item, completion)
 
     async def _complete_cancelled(
         self,
@@ -424,19 +443,43 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         *,
         reason: str | None,
     ) -> None:
-        completion = await self.backend.write_completion(
-            item.execution,
-            state=JobState.CANCELLED,
-            error=JobError(
-                code="cancelled",
-                message=reason or "Job cancelled",
-            ),
-        )
-        if not await self._publish_terminal_observation(completion):
+        try:
+            completion = await self.backend.write_completion(
+                item.execution,
+                state=JobState.CANCELLED,
+                error=JobError(
+                    code="cancelled",
+                    message=reason or "Job cancelled",
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "Unable to write cancelled completion for %s",
+                item.execution.job_id,
+            )
             await self._retry_terminal_delivery(item)
             return
-        await self.backend.signal_status(item.execution.job_id)
-        await item.delivery.ack()
+        await self._finalize_terminal_delivery(item, completion)
+
+    async def _finalize_terminal_delivery(
+        self,
+        item: WorkItem,
+        completion: ExecutionRecord,
+    ) -> bool:
+        if not await self._publish_terminal_observation(completion):
+            await self._retry_terminal_delivery(item)
+            return False
+        try:
+            await self.backend.signal_status(completion.job_id)
+            await item.delivery.ack()
+        except Exception:
+            logger.exception(
+                "Unable to acknowledge terminal delivery for %s",
+                completion.job_id,
+            )
+            await self._retry_terminal_delivery(item)
+            return False
+        return True
 
     async def _publish_terminal_observation(
         self,
