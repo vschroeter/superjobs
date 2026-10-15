@@ -143,6 +143,15 @@ def cli_process_argv(repo_root: Path, python_version: str, run_dir: Path) -> lis
     )
 
 
+def resource_admission_argv(repo_root: Path, python_version: str, run_dir: Path) -> list[str]:
+    artifact = run_dir / "resource-admission"
+    artifact.mkdir(parents=True, exist_ok=True)
+    return _python_tool_argv(
+        repo_root, "tools/verify_resource_admission.py", "--python", python_version,
+        "--artifact-dir", str(artifact),
+    )
+
+
 FAST_STAGES: tuple[StageSpec, ...] = (
     StageSpec(
         name="deterministic-pytest",
@@ -204,6 +213,13 @@ INTEGRATION_STAGES: tuple[StageSpec, ...] = (
         timeout_seconds=_TOOL_STAGE_TIMEOUT,
         build_argv=cli_process_argv,
         description="Installed contract-interface CLI local run and NATS submit verification.",
+    ),
+    StageSpec(
+        name="resource-admission",
+        kind="tool",
+        timeout_seconds=_TOOL_STAGE_TIMEOUT,
+        build_argv=resource_admission_argv,
+        description="Installed worker resource exclusion, redelivery, termination and broker recovery.",
     ),
 )
 
