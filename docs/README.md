@@ -6,6 +6,7 @@ Pre-alpha typed jobs over NATS JetStream. Start with the repository
 | Guide | Contents |
 | --- | --- |
 | [api.md](api.md) | Public behavior, semantics, typing limits |
+| [resource-admission.md](resource-admission.md) | Exclusive device admission, recovery, typing fixtures |
 | [worker-discovery.md](worker-discovery.md) | Worker leases, capability factories and local update handles |
 | [cli.md](cli.md) | Optional Typer CLI: registration, input, local `run`, remote `submit` |
 | [payload-validation.md](payload-validation.md) | Strict boundary behavior and adapter policy |

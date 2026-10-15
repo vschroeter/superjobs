@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from contextlib import AsyncExitStack
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from typing import Any, ParamSpec, TypeVar, overload
 
 from faststream.nats import NatsBroker
@@ -50,7 +50,10 @@ from superjobs.jobs.job_context import JobContext, ObservationPolicy
 from superjobs.jobs.job_handler import JobHandler
 from superjobs.jobs.retention import ObservationRetention, ResultRetention
 from superjobs.jobs.retry_policy import RetryPolicy
+from superjobs.resources.models import ResourceRequirement, WorkerIncarnation
 from superjobs.runtime_lifecycle import ShutdownCompletion, finish_cleanup
+from superjobs.jobs.resource_runtime import ResourceRuntimeCoordinator
+from superjobs.runtime_resources import RuntimeResources, resource_admission_for_backend
 from superjobs.jobs.discovery_namespace import JobsDiscovery
 from superjobs.transport.backend import JobBackend
 from superjobs.transport.in_memory import InMemoryTransport
@@ -79,6 +82,7 @@ class SuperJobs:
         discovery: bool = True,
         presence_config: PresenceConfig | None = None,
         presence_clock: Clock | None = None,
+        resource_capacities: Mapping[str, int] | None = None,
     ):
         if broker is not None and transport is not None:
             raise ValueError("Pass either broker or transport, not both")
@@ -139,6 +143,19 @@ class SuperJobs:
             presence_clock=presence_clock,
         )
         self._serving_generation = 0
+        self._resource_capacities = dict(resource_capacities or {})
+        for resource_key, units in self._resource_capacities.items():
+            ResourceRequirement(resource_key=resource_key, units=units)
+        admission = resource_admission_for_backend(self.transport)
+        if self._resource_capacities and admission is None:
+            raise ValueError(
+                "resource_capacities requires a transport with a shared resource admission store",
+            )
+        self._resource_admission = admission
+        self._resource_coordinator = ResourceRuntimeCoordinator(self)
+        self._runtime_resources = (
+            RuntimeResources(admission) if admission is not None else None
+        )
         self.discovery = JobsDiscovery(self)
         if handlers is not None:
             self._consume_catalog_snapshot(handlers.snapshot())
@@ -154,6 +171,34 @@ class SuperJobs:
     @property
     def catalog(self) -> HandlerCatalog:
         return self._catalog
+
+    @property
+    def resources(self) -> RuntimeResources:
+        if self._runtime_resources is None:
+            raise RuntimeError("This transport does not support resource admission")
+        return self._runtime_resources
+
+    def _worker_incarnation(self) -> WorkerIncarnation:
+        return WorkerIncarnation(
+            worker_id=self._worker_id,
+            incarnation_id=str(self._serving_generation),
+        )
+
+    async def _declare_resource_capacities(self) -> None:
+        if self._resource_admission is None:
+            return
+        for key, units in self._resource_capacities.items():
+            await self._resource_admission.declare_capacity(
+                ResourceRequirement(resource_key=key, units=units),
+            )
+        for handler in self._handlers.values():
+            config = handler._resource_config
+            if config is not None and not await self._resource_admission.is_declared(
+                config.requirement.resource_key
+            ):
+                raise ValueError(
+                    f"Resource capacity is not declared: {config.requirement.resource_key}"
+                )
 
     def _consume_catalog_snapshot(self, snapshot: HandlerCatalogSnapshot) -> None:
         for binding in snapshot:
@@ -189,6 +234,8 @@ class SuperJobs:
                 callback,
                 backend=self.transport,
                 default_observation_policy=self.observation_policy,
+                incarnation=self._worker_incarnation,
+                coordinator=self._resource_coordinator,
             )
             register_job_on_backend(self.transport, binding.job)
             self._presence.register_handler(binding.job, binding.capabilities)
@@ -243,12 +290,16 @@ class SuperJobs:
         try:
             serving_generation = await self._presence.begin_serving_generation()
             self._serving_generation = serving_generation
+            self._resource_coordinator.begin_serving()
             await self.transport.start()
+            await self._declare_resource_capacities()
             await self._activate_provider_bindings()
             if self._handlers:
                 await self._presence.publish_all_initial(generation=serving_generation)
             start_tasks = [
-                asyncio.create_task(handler.start(), name=f"superjobs-handler-start-{key}")
+                asyncio.create_task(
+                    handler.start(), name=f"superjobs-handler-start-{key}"
+                )
                 for key, handler in self._handlers.items()
             ]
             if start_tasks:
@@ -256,7 +307,9 @@ class SuperJobs:
             self._presence.start_renewal()
         except BaseException as error:
             rollback = asyncio.create_task(
-                self._rollback_start(start_tasks, serving_generation=serving_generation),
+                self._rollback_start(
+                    start_tasks, serving_generation=serving_generation
+                ),
             )
             try:
                 await finish_cleanup(rollback)
@@ -419,6 +472,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> RuntimeNoRequestHandlerDecorator[FinalT, InterT]: ...
@@ -432,6 +486,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> RuntimeNoRequestHandlerDecorator[FinalT, InterT]: ...
@@ -445,6 +500,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> RuntimeHandlerDecorator[ReqT, FinalT, InterT]: ...
@@ -458,6 +514,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> RuntimeHandlerDecorator[ReqT, FinalT, InterT]: ...
@@ -470,9 +527,13 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: object = None,
-    ) -> RuntimeHandlerDecorator[Any, Any, Any] | RuntimeNoRequestHandlerDecorator[Any, Any]:
+    ) -> (
+        RuntimeHandlerDecorator[Any, Any, Any]
+        | RuntimeNoRequestHandlerDecorator[Any, Any]
+    ):
         if job.request_type is None:
             return RuntimeNoRequestHandlerDecorator(
                 self,
@@ -483,6 +544,7 @@ class SuperJobs:
                 heartbeat_interval=heartbeat_interval,
                 cli=cli,
                 capabilities=capabilities,
+                resources=resources,
             )
         return RuntimeHandlerDecorator(
             self,
@@ -493,6 +555,7 @@ class SuperJobs:
             heartbeat_interval=heartbeat_interval,
             cli=cli,
             capabilities=capabilities,
+            resources=resources,
         )
 
     # Compatibility alias for the original sketch while callers migrate.
@@ -509,6 +572,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
 
@@ -523,6 +587,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
 
@@ -537,6 +602,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         capabilities: None = None,
     ) -> None: ...
 
@@ -551,6 +617,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         capabilities: None = None,
     ) -> None: ...
 
@@ -565,6 +632,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
 
@@ -579,6 +647,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
 
@@ -593,6 +662,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         capabilities: None = None,
     ) -> None: ...
 
@@ -607,6 +677,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         capabilities: None = None,
     ) -> None: ...
 
@@ -620,6 +691,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
     ) -> None: ...
 
     @overload
@@ -632,18 +704,22 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
     ) -> None: ...
 
     @overload
     def register(
         self,
-        marked_callback: Callable[[ReqT, JobContext[InterT]], Coroutine[Any, Any, FinalT]],
+        marked_callback: Callable[
+            [ReqT, JobContext[InterT]], Coroutine[Any, Any, FinalT]
+        ],
         /,
         *,
         concurrency: int = 1,
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
     ) -> None: ...
 
     @overload
@@ -656,6 +732,7 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
     ) -> None: ...
 
     def register(
@@ -668,12 +745,15 @@ class SuperJobs:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: Any | None = None,
     ) -> None:
         if callback is not None:
             if not isinstance(job_or_marked, Job):
-                raise TypeError("First argument must be a Job when registering a handler")
+                raise TypeError(
+                    "First argument must be a Job when registering a handler"
+                )
             self._register_handler(
                 job_or_marked,
                 callback,
@@ -683,6 +763,7 @@ class SuperJobs:
                 heartbeat_interval=heartbeat_interval,
                 cli=cli,
                 capabilities=capabilities,
+                resources=resources,
             )
             return
 
@@ -702,6 +783,7 @@ class SuperJobs:
             heartbeat_interval=heartbeat_interval,
             cli=cli,
             capabilities=capabilities,
+            resources=resources,
         )
 
     @overload
@@ -769,6 +851,7 @@ class SuperJobs:
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
         capabilities: Any | None = None,
+        resources: Mapping[str, int] | None = None,
         catalog_source: bool = False,
     ) -> None:
         if self._starting:
@@ -800,6 +883,26 @@ class SuperJobs:
 
         validate_handler_job_association(job, callback)
         validate_handler_signature(job, callback)
+        if resources and not catalog_source:
+            from superjobs.jobs.catalog_runtime import build_resource_handler_config
+
+            build_resource_handler_config(
+                HandlerBinding(
+                    job=job,
+                    callback=callback,
+                    provider=None,
+                    concurrency=concurrency,
+                    retry=retry,
+                    observation_policy=observation_policy,
+                    heartbeat_interval=heartbeat_interval,
+                    cli=None,
+                    capabilities=capabilities,
+                    resources=resources,
+                ),
+                backend=self.transport,
+                incarnation=self._worker_incarnation,
+                coordinator=self._resource_coordinator,
+            )
 
         if not catalog_source:
             existing = self._catalog.get(job)
@@ -814,9 +917,42 @@ class SuperJobs:
                         observation_policy=observation_policy,
                         heartbeat_interval=heartbeat_interval,
                         capabilities=capabilities,
+                        resources=resources,
                         cli=cli,
                         attach_marker=False,
                     )
+
+        binding_for_resources = self._catalog.get(job)
+        resource_config = None
+        if binding_for_resources is not None and binding_for_resources.resources:
+            from superjobs.jobs.catalog_runtime import build_resource_handler_config
+
+            resource_config = build_resource_handler_config(
+                binding_for_resources,
+                backend=self.transport,
+                incarnation=self._worker_incarnation,
+                coordinator=self._resource_coordinator,
+            )
+        elif resources:
+            from superjobs.jobs.catalog_runtime import build_resource_handler_config
+
+            resource_config = build_resource_handler_config(
+                HandlerBinding(
+                    job=job,
+                    callback=callback,
+                    provider=None,
+                    concurrency=concurrency,
+                    retry=retry,
+                    observation_policy=observation_policy,
+                    heartbeat_interval=heartbeat_interval,
+                    cli=None,
+                    capabilities=capabilities,
+                    resources=resources,
+                ),
+                backend=self.transport,
+                incarnation=self._worker_incarnation,
+                coordinator=self._resource_coordinator,
+            )
 
         handler = JobHandler(
             job,
@@ -826,6 +962,7 @@ class SuperJobs:
             retry=retry,
             observation_policy=observation_policy or self.observation_policy,
             heartbeat_interval=heartbeat_interval,
+            resource_config=resource_config,
         )
 
         register_job_on_backend(self.transport, job)

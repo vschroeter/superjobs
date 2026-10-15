@@ -214,7 +214,8 @@ composition, resources, and contracts-only CLIs:
 For tests without a broker, use `InMemoryTransport`; see
 [docs/development.md](docs/development.md).
 
-Further API detail: [docs/api.md](docs/api.md). Domain terms:
+Further API detail: [docs/api.md](docs/api.md). Resource admission (v1):
+[docs/resource-admission.md](docs/resource-admission.md). Domain terms:
 [GLOSSARY.md](GLOSSARY.md). Checks and CI:
 [docs/development.md](docs/development.md). Measured results:
 [docs/verification.md](docs/verification.md).

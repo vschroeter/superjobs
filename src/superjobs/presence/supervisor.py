@@ -44,7 +44,11 @@ class PresenceSupervisor:
     """Serialize each registration's publication independently of Attempt leases."""
 
     def __init__(
-        self, *, worker_id: str, transport: Any, enabled: bool,
+        self,
+        *,
+        worker_id: str,
+        transport: Any,
+        enabled: bool,
         presence_config: PresenceConfig | None = None,
         presence_clock: Clock | None = None,
     ) -> None:
@@ -56,6 +60,7 @@ class PresenceSupervisor:
         self._resolved_config: PresenceConfig | None = None
         self._discovery: DiscoveryBackend | None = None
         self._entries: dict[str, PresenceEntry] = {}
+        self._withdrawn_keys: set[str] = set()
         self._serving_generation = 0
         self._phase = "stopped"
         self._renewal_task: asyncio.Task[None] | None = None
@@ -161,11 +166,16 @@ class PresenceSupervisor:
             task.add_done_callback(self._consume_task_result)
             raise
 
-    def _require_ready(self, entry: PresenceEntry, *, generation: int, fence: int) -> None:
+    def _require_ready(
+        self, entry: PresenceEntry, *, generation: int, fence: int
+    ) -> None:
         if (
-            self._phase != "ready" or generation != self._serving_generation
-            or entry.generation != generation or entry.fence != fence
+            self._phase != "ready"
+            or generation != self._serving_generation
+            or entry.generation != generation
+            or entry.fence != fence
             or entry.accepted is None
+            or entry.job.canonical_name in self._withdrawn_keys
         ):
             raise LocalWorkerHandleError("Handler presence is not ready", job=entry.job)
 
@@ -209,6 +219,33 @@ class PresenceSupervisor:
             expires_at=now + self._config_for_publication().lease_timeout,
             capabilities=raw, metadata=WorkerRegistrationMetadata(),
         )
+
+    async def withdraw_readiness(self, job: Job[Any, Any, Any]) -> None:
+        """Mark a handler as draining without tearing down in-flight admission."""
+        self._withdrawn_keys.add(job.canonical_name)
+        if not self._enabled:
+            return
+        entry = self._entries.get(job.canonical_name)
+        if entry is None or entry.accepted is None:
+            return
+
+        async def run() -> None:
+            async with entry.lock:
+                now = utc_now(self._clock)
+                registration = replace(
+                    entry.accepted,
+                    state=WorkerRegistrationState.DRAINING,
+                    last_seen_at=now,
+                    expires_at=now + self._config_for_publication().lease_timeout,
+                )
+                await self._write(
+                    entry,
+                    registration,
+                    generation=entry.generation,
+                    fence=entry.fence,
+                )
+
+        await self._operation(run())
 
     async def publish_initial(self, job: Job[Any, Any, Any], *, generation: int) -> None:
         if not self._enabled:
@@ -305,16 +342,29 @@ class PresenceSupervisor:
 
         async def run() -> None:
             async with entry.lock:
-                if self._phase != "ready" or entry.accepted is None:
+                if (
+                    self._phase != "ready"
+                    or entry.accepted is None
+                    or entry.job.canonical_name in self._withdrawn_keys
+                ):
                     return
                 self._require_ready(entry, generation=generation, fence=fence)
                 # Capture the latest accepted bytes while holding the publication lock.
-                await self._write(entry, self._registration(entry, entry.accepted.capabilities), generation=generation, fence=fence)
+                await self._write(
+                    entry,
+                    self._registration(entry, entry.accepted.capabilities),
+                    generation=generation,
+                    fence=fence,
+                )
 
         try:
             await self._operation(run())
         except Exception:
-            logger.exception("Worker presence renewal failed for worker %s on %s", self._worker_id, entry.job)
+            logger.exception(
+                "Worker presence renewal failed for worker %s on %s",
+                self._worker_id,
+                entry.job,
+            )
 
     async def _renewal_loop(self) -> None:
         interval = self._resolve_config().renewal_interval.total_seconds()
@@ -397,6 +447,7 @@ class PresenceSupervisor:
         return errors
 
     async def begin_serving_generation(self) -> int:
+        self._withdrawn_keys.clear()
         self._serving_generation += 1
         self._phase = "starting"
         return self._serving_generation

@@ -8,6 +8,7 @@ from typing import Any, Generic, TypeVar
 
 class JobState(StrEnum):
     PENDING = "pending"
+    WAITING_FOR_RESOURCE = "waiting_for_resource"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -114,6 +115,7 @@ class CompletionRecord(Generic[FinalT]):
     completed_at: datetime
     result: FinalT | None = None
     error: JobError | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class JobSucceeded(Generic[FinalT]):

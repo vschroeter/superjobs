@@ -8,6 +8,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from superjobs.exceptions.jobs import JobCancelledError
+from superjobs.jobs.resource_cleanup import (
+    acknowledge_resource_cleanup,
+    resource_cleanup_failed,
+)
 from superjobs.jobs.events import (
     JobLog,
     JobProgress,
@@ -252,6 +256,16 @@ class JobContext[InterT: Any]:
     @property
     def cancelled(self) -> bool:
         return self._cancelled
+
+    def acknowledge_resource_cleanup(self) -> None:
+        """Confirm cleanup has finished, including on an inference error path."""
+        acknowledge_resource_cleanup(self)
+
+    def resource_cleanup_failed(self, reason: str) -> None:
+        """Retain admission because application resource cleanup failed."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("cleanup failure reason must be a non-empty string")
+        resource_cleanup_failed(self, reason)
 
     @property
     def progress_snapshot(self) -> ProgressSnapshot | None:

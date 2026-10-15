@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, overload
 
 from superjobs.jobs.handler_binding import attach_job_marker
@@ -89,6 +89,7 @@ class _RuntimeBinding:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Any | None = None,
         capabilities: Any | None = None,
     ) -> None:
@@ -100,6 +101,7 @@ class _RuntimeBinding:
         self._heartbeat_interval = heartbeat_interval
         self._cli = cli
         self._capabilities = capabilities
+        self._resources = resources
 
     def _bind(self, callback: Callable[..., Any]) -> None:
         self._superjobs._register_handler(

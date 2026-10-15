@@ -90,6 +90,7 @@ class HandlerBinding:
     heartbeat_interval: float | None
     cli: Command | None
     capabilities: Any | None = None
+    resources: Mapping[str, int] | None = None
 
     def __post_init__(self) -> None:
         if self.callback is None and self.provider is None:
@@ -100,6 +101,17 @@ class HandlerBinding:
             raise ValueError("concurrency must be at least one")
         if self.heartbeat_interval is not None and self.heartbeat_interval <= 0:
             raise ValueError("heartbeat_interval must be positive")
+        if self.resources is not None:
+            from superjobs.resources import parse_exclusive_resource_requirement
+
+            parse_exclusive_resource_requirement(self.resources)
+            if self.provider is not None:
+                raise ValueError(
+                    "resource-bound handlers cannot use process-lifetime providers in v1"
+                )
+            object.__setattr__(
+                self, "resources", MappingProxyType(dict(self.resources))
+            )
 
 
 class HandlerCatalogSnapshot:
@@ -135,6 +147,7 @@ class _CatalogBinding:
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
         capabilities: Any | None = None,
+        resources: Mapping[str, int] | None = None,
     ) -> None:
         self._catalog = catalog
         self._job = job
@@ -144,6 +157,7 @@ class _CatalogBinding:
         self._heartbeat_interval = heartbeat_interval
         self._cli = cli
         self._capabilities = capabilities
+        self._resources = resources
 
     def _bind(self, callback: Callable[..., Any]) -> None:
         self._catalog._register_callback(
@@ -155,6 +169,7 @@ class _CatalogBinding:
             heartbeat_interval=self._heartbeat_interval,
             cli=self._cli,
             capabilities=self._capabilities,
+            resources=self._resources,
         )
 
 
@@ -185,6 +200,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> CatalogNoRequestHandlerDecorator[FinalT, InterT]: ...
@@ -198,6 +214,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> CatalogNoRequestHandlerDecorator[FinalT, InterT]: ...
@@ -211,6 +228,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> CatalogHandlerDecorator[ReqT, FinalT, InterT]: ...
@@ -224,6 +242,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> CatalogHandlerDecorator[ReqT, FinalT, InterT]: ...
@@ -238,7 +257,11 @@ class HandlerCatalog:
         heartbeat_interval: float | None = None,
         cli: str | Command | None = None,
         capabilities: object = None,
-    ) -> CatalogHandlerDecorator[Any, Any, Any] | CatalogNoRequestHandlerDecorator[Any, Any]:
+        resources: Mapping[str, int] | None = None,
+    ) -> (
+        CatalogHandlerDecorator[Any, Any, Any]
+        | CatalogNoRequestHandlerDecorator[Any, Any]
+    ):
         if job.request_type is None:
             return CatalogNoRequestHandlerDecorator(
                 self,
@@ -249,6 +272,7 @@ class HandlerCatalog:
                 heartbeat_interval=heartbeat_interval,
                 cli=cli,
                 capabilities=capabilities,
+                resources=resources,
             )
         return CatalogHandlerDecorator(
             self,
@@ -259,6 +283,7 @@ class HandlerCatalog:
             heartbeat_interval=heartbeat_interval,
             cli=cli,
             capabilities=capabilities,
+            resources=resources,
         )
 
     @overload
@@ -272,6 +297,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
@@ -287,6 +313,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
@@ -302,6 +329,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> None: ...
@@ -317,6 +345,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> None: ...
@@ -332,6 +361,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
@@ -347,6 +377,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
@@ -362,6 +393,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> None: ...
@@ -377,6 +409,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> None: ...
@@ -391,6 +424,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
     ) -> None: ...
 
@@ -404,6 +438,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
     ) -> None: ...
 
@@ -419,6 +454,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
     ) -> None: ...
 
@@ -432,6 +468,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
     ) -> None: ...
 
@@ -445,12 +482,15 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: Any | None = None,
     ) -> None:
         if callback is not None:
             if not isinstance(job_or_marked, Job):
-                raise TypeError("First argument must be a Job when registering a handler")
+                raise TypeError(
+                    "First argument must be a Job when registering a handler"
+                )
             self._register_callback(
                 job_or_marked,
                 callback,
@@ -460,6 +500,7 @@ class HandlerCatalog:
                 heartbeat_interval=heartbeat_interval,
                 cli=cli,
                 capabilities=capabilities,
+                resources=resources,
             )
             return
 
@@ -479,6 +520,7 @@ class HandlerCatalog:
             heartbeat_interval=heartbeat_interval,
             cli=cli,
             capabilities=capabilities,
+            resources=resources,
         )
 
     @overload
@@ -498,6 +540,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
@@ -519,6 +562,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
@@ -540,6 +584,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> None: ...
@@ -561,6 +606,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> None: ...
@@ -575,6 +621,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: object = None,
     ) -> None:
@@ -587,6 +634,7 @@ class HandlerCatalog:
             heartbeat_interval=heartbeat_interval,
             cli=cli,
             capabilities=capabilities,
+            resources=resources,
         )
 
     @overload
@@ -606,6 +654,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
@@ -627,6 +676,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: CapabilityInput[CapT] = None,
     ) -> None: ...
@@ -648,6 +698,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> None: ...
@@ -669,6 +720,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: None = None,
     ) -> None: ...
@@ -683,6 +735,7 @@ class HandlerCatalog:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resources: Mapping[str, int] | None = None,
         cli: str | Command | None = None,
         capabilities: object = None,
     ) -> None:
@@ -696,6 +749,7 @@ class HandlerCatalog:
             heartbeat_interval=heartbeat_interval,
             cli=cli,
             capabilities=capabilities,
+            resources=resources,
         )
 
     def get(self, job: Job[Any, Any, Any]) -> HandlerBinding | None:
@@ -715,6 +769,7 @@ class HandlerCatalog:
         heartbeat_interval: float | None,
         cli: str | Command | None,
         capabilities: Any | None = None,
+        resources: Mapping[str, int] | None = None,
         attach_marker: bool = True,
     ) -> None:
         validate_handler_job_association(job, callback)
@@ -736,8 +791,11 @@ class HandlerCatalog:
             heartbeat_interval=heartbeat_interval,
             cli=normalized_cli,
             capabilities=capabilities,
+            resources=resources,
         )
-        self._store_binding(job, binding, callback=callback, attach_marker=attach_marker)
+        self._store_binding(
+            job, binding, callback=callback, attach_marker=attach_marker
+        )
 
     def _register_provider(
         self,
@@ -750,7 +808,12 @@ class HandlerCatalog:
         heartbeat_interval: float | None,
         cli: str | Command | None,
         capabilities: Any | None = None,
+        resources: Mapping[str, int] | None = None,
     ) -> None:
+        if resources:
+            raise ValueError(
+                "resource-bound handlers cannot use process-lifetime providers in v1",
+            )
         _validate_provider_factory(provider)
         normalized_cli = _prepare_registration(
             job,
@@ -769,6 +832,7 @@ class HandlerCatalog:
             heartbeat_interval=heartbeat_interval,
             cli=normalized_cli,
             capabilities=capabilities,
+            resources=resources,
         )
         self._store_binding(job, binding, callback=None)
 

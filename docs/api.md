@@ -18,6 +18,7 @@ Optional application CLI: [cli.md](cli.md). Runnable contracts:
 | Worker runtime `serve()` and `wait_until_stopped()` lifecycle helpers | **Implemented** |
 | Worker discovery (`client.workers()`, `jobs.discovery.*`), persistent presence and capability updates | **Implemented** ([#52](https://github.com/vschroeter/superjobs/issues/52), [#53](https://github.com/vschroeter/superjobs/issues/53), [#54](https://github.com/vschroeter/superjobs/issues/54)); installed crash/recovery scenarios tracked in [#55](https://github.com/vschroeter/superjobs/issues/55) |
 | Shared `HandlerCatalog`, runtime `handlers=` consumption, catalog-backed CLI | **Implemented** (issue [#46](https://github.com/vschroeter/superjobs/issues/46)) |
+| Resource admission (`superjobs.resources`, capacities, handler `resources=`, `jobs.resources`) | **Implemented (v1)** — [resource-admission.md](resource-admission.md), ADR [0009](adr/0009-resource-admission-and-confirmed-recovery.md); cross-process proof tracked separately |
 | Blocking sync producer helpers with continuous runtime lifecycle | **Direction only** ([#36](https://github.com/vschroeter/superjobs/issues/36)) |
 | Dependency-sensitive strict validation guard | **Future** ([#32](https://github.com/vschroeter/superjobs/issues/32)) |
 | Presence-aware constructor/handler typing refinements | **Open** ([#31](https://github.com/vschroeter/superjobs/issues/31)) |

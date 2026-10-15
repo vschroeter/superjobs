@@ -25,11 +25,24 @@ def register_callback_binding(
     key = binding.job.canonical_name
     if key in runtime._handlers:
         raise ValueError(f"A handler is already registered for {binding.job}")
+    if binding.resources and binding.provider is not None:
+        raise ValueError(
+            "resource-bound handlers cannot use process-lifetime providers in v1",
+        )
+    if binding.resources:
+        from superjobs.cli.local_run import LocalRuntimeValidationError
+
+        raise LocalRuntimeValidationError(
+            "local run cannot execute resource-bound handlers against a physical device; "
+            "use a remote worker runtime instead",
+        )
     handler = create_job_handler(
         binding,
         callback,
         backend=runtime.transport,
         default_observation_policy=runtime.observation_policy,
+        incarnation=runtime._worker_incarnation,
+        coordinator=runtime._resource_coordinator,
     )
     register_job_on_backend(runtime.transport, binding.job)
     runtime._presence.register_handler(binding.job, binding.capabilities)
