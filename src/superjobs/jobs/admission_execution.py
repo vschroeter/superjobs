@@ -212,7 +212,9 @@ async def _process_invocation(
                     code="deadline_exceeded",
                     message="Execution deadline exceeded while waiting for a resource",
                 )
-            if error is not None:
+            if error is not None and item.execution.state in {
+                JobState.PENDING, JobState.WAITING_FOR_RESOURCE
+            }:
                 await _retry(
                     lambda: handler.backend.write_completion(
                         item.execution,
@@ -226,6 +228,9 @@ async def _process_invocation(
                 if item.execution.state in TERMINAL:
                     await _terminal(handler, item)
                     return
+                # A competing invocation may have started between refresh and CAS.
+                # Yield before retrying; only its owner may finalize running work.
+                await asyncio.sleep(config.poll_interval)
                 continue
             try:
                 result = await _retry(
@@ -315,6 +320,30 @@ async def _run_admitted(
         if item.execution.state not in TERMINAL:
             await _retry(lambda: item.delivery.retry(attempt=item.attempt), config)
         await _retry(lambda: config.admission.finalize_execution_claim(owner), config)
+        return
+    # Confirmed termination can leave a RUNNING execution record after the old
+    # owner was revoked. Acquire a fresh fenced invocation before finalizing it;
+    # never spin on a waiting-only completion write against RUNNING state.
+    cancel_requested = await _retry(
+        lambda: handler.backend.is_cancel_requested(item.execution.job_id), config
+    )
+    deadline_expired = (
+        item.execution.deadline is not None
+        and datetime.now(UTC) >= item.execution.deadline
+    )
+    if cancel_requested or deadline_expired:
+        await _retry(lambda: config.admission.release_resource_after_cleanup(owner), config)
+        await _persist(
+            handler, item, config, owner,
+            state=JobState.CANCELLED if cancel_requested else JobState.FAILED,
+            error=JobError(
+                code="cancelled" if cancel_requested else "deadline_exceeded",
+                message="Cancellation requested before handler entry" if cancel_requested
+                else "Execution deadline exceeded before handler entry",
+            ),
+        )
+        await _retry(lambda: config.admission.finalize_execution_claim(owner), config)
+        await _terminal(handler, item)
         return
     context = JobContext(
         handler.job,
