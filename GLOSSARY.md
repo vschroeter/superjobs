@@ -80,6 +80,38 @@ _Avoid_: Known contract, locally registered Job, guaranteed availability
 The number of different Job executions a SuperJobs runtime may process at the same time within the automatically load-balanced pool for a Job; a value of one requires the current Attempt to finish before another request is consumed.
 _Avoid_: Consumer group, attempt concurrency
 
+**Resource admission**:
+Permission for one delivery invocation to enter resource-consuming execution, after claiming both its Job execution and the required resource.
+_Avoid_: Worker discovery, scheduling, worker concurrency
+
+**Resource key**:
+An application-selected identity shared by every handler that consumes the same physical resource, independent of its Job identity.
+_Avoid_: Engine name, worker ID, capability
+
+**Worker incarnation**:
+One serving lifetime of a worker instance, distinguished from earlier or later lifetimes even when the application reuses its worker identity.
+_Avoid_: Permanent host identity, Job execution, worker presence
+
+**Delivery invocation**:
+One concrete invocation processing a delivered request, distinguished from simultaneous or redelivered invocations of the same Job execution.
+_Avoid_: Job execution identity, inference retry
+
+**Resource reservation**:
+Ownership of a resource by an admitted delivery invocation, retained until acknowledged cleanup or confirmed termination permits release.
+_Avoid_: Presence lease, automatic expiry, routing reservation
+
+**Admission token**:
+The identity and generation of an admission owner used to reject operations from an earlier owner.
+_Avoid_: Physical process isolation, cancellation request
+
+**Cleanup acknowledgement**:
+The handler's confirmation that its resource-consuming work and cleanup have finished; distinct from a request to cancel that work.
+_Avoid_: Successful result, GPU memory verification, confirmed termination
+
+**Confirmed termination**:
+A trusted supervisor's attestation that an owning worker incarnation and its contained processes have exited, allowing its retained reservations to be resolved.
+_Avoid_: Presence expiry, heartbeat timeout, cancellation request
+
 **Load-balanced Job pool**:
 All SuperJobs runtimes handling the same Job participate in one automatically shared pool of executions, without caller-selectable worker groups.
 _Avoid_: Consumer group, broadcast group

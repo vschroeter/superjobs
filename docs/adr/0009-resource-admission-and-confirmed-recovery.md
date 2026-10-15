@@ -1,0 +1,5 @@
+# Resource admission requires acknowledged cleanup or confirmed termination
+
+Accepted in [Implement durable resource admission with fenced execution ownership and confirmed recovery](https://github.com/vschroeter/superjobs/issues/61), following the maintainer's resource-admission proposal. SuperJobs coordinates exclusive delivery-invocation and physical-resource ownership through durable broker records, independently of worker presence and completed-result retention. Applications retain scheduling and artifact acceptance responsibilities.
+
+Heartbeat expiry and broker uncertainty cannot authorize takeover: a token cannot stop an earlier native computation. We choose retained, visibly unavailable ownership over automatic lease-based recovery, accepting the need for a trusted supervisor to confirm the owning incarnation and its contained processes have exited. Acknowledged handler cleanup and supervisor-confirmed termination are separate release paths; delayed operations must be fenced against later owners. This removes a requirement for shared filesystem guards without claiming physical resource isolation or cleanup verification by the library.
