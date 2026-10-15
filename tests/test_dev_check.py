@@ -25,6 +25,7 @@ from scripts.dev_check.stages import (  # noqa: E402
     contract_typing_argv,
     cross_program_argv,
     cli_process_argv,
+    resource_admission_argv,
     evaluate_pytest_stage,
     evaluate_tool_stage,
     integration_pytest_argv,
@@ -271,6 +272,7 @@ def test_integration_stages_include_required_process_proofs() -> None:
         "broker-restart",
         "idle-outage",
         "cli-process",
+        "resource-admission",
     ]
 
 
@@ -291,6 +293,9 @@ def test_integration_argv_uses_custom_artifact_dir(tmp_path: Path) -> None:
     cli = cli_process_argv(REPO_ROOT, "3.12", run_dir)
     assert str(run_dir / "cli-process") in " ".join(cli)
     assert cli[cli.index("--python") + 1] == "3.12"
+    admission = resource_admission_argv(REPO_ROOT, "3.12", run_dir)
+    assert str(run_dir / "resource-admission") in " ".join(admission)
+    assert admission[admission.index("--python") + 1] == "3.12"
 
 
 def test_run_stages_sets_nats_log_dir(tmp_path: Path) -> None:

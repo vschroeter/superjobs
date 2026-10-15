@@ -4,14 +4,23 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from superjobs.jobs.resource_runtime import ResourceRuntimeCoordinator
 
 from superjobs.jobs.handler_binding import validate_handler_job_association, validate_handler_signature
 from superjobs.jobs.handler_catalog import HandlerBinding
 from superjobs.jobs.job import Job
 from superjobs.jobs.job_context import ObservationPolicy
+from superjobs.jobs.admission_execution import ResourceHandlerConfig
 from superjobs.jobs.job_handler import JobHandler
 from superjobs.jobs.retry_policy import RetryPolicy
+from superjobs.resources.models import (
+    WorkerIncarnation,
+    parse_exclusive_resource_requirement,
+)
+from superjobs.runtime_resources import resource_admission_for_backend
 from superjobs.transport.backend import JobBackend
 
 
@@ -32,12 +41,37 @@ def binding_handler_options(
     }
 
 
+def build_resource_handler_config(
+    binding: HandlerBinding,
+    *,
+    backend: JobBackend,
+    incarnation: Callable[[], WorkerIncarnation],
+    coordinator: ResourceRuntimeCoordinator | None = None,
+) -> ResourceHandlerConfig | None:
+    if binding.resources is None:
+        return None
+    admission = resource_admission_for_backend(backend)
+    if admission is None:
+        raise RuntimeError(
+            "transport does not expose a shared resource admission store"
+        )
+    requirement = parse_exclusive_resource_requirement(binding.resources)
+    return ResourceHandlerConfig(
+        requirement=requirement,
+        admission=admission,
+        incarnation=incarnation,
+        coordinator=coordinator,
+    )
+
+
 def create_job_handler(
     binding: HandlerBinding,
     callback: Callable[..., Any],
     *,
     backend: JobBackend,
     default_observation_policy: ObservationPolicy,
+    incarnation: Callable[[], WorkerIncarnation] | None = None,
+    coordinator: ResourceRuntimeCoordinator | None = None,
 ) -> JobHandler[Any, Any, Any]:
     validate_handler_job_association(binding.job, callback)
     validate_handler_signature(binding.job, callback)
@@ -45,6 +79,14 @@ def create_job_handler(
         binding,
         default_observation_policy=default_observation_policy,
     )
+    resource_config = None
+    if incarnation is not None:
+        resource_config = build_resource_handler_config(
+            binding,
+            backend=backend,
+            incarnation=incarnation,
+            coordinator=coordinator,
+        )
     return JobHandler(
         binding.job,
         callback,
@@ -53,6 +95,7 @@ def create_job_handler(
         retry=options["retry"],
         observation_policy=options["observation_policy"],
         heartbeat_interval=options["heartbeat_interval"],
+        resource_config=resource_config,
     )
 
 

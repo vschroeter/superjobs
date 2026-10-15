@@ -22,7 +22,15 @@ from superjobs.transport.backend import (
     WorkItem,
     WorkSubscription,
 )
+from superjobs.transport.admission_record import (
+    admission_owner_from_wire,
+    admission_owner_to_wire,
+    admission_owners_match,
+)
 from superjobs.transport.delivery import Delivery
+from superjobs.resources.models import AdmissionOwner
+from superjobs.resources.admission import ResourceAdmission
+from superjobs.resources.errors import ResourceStaleOperationError
 
 
 class _InMemoryDelivery(Delivery):
@@ -159,6 +167,7 @@ class InMemoryTransport(JobBackend):
         discovery_store: Any | None = None,
         presence_config: Any | None = None,
         discovery_clock: Callable[[], datetime] | None = None,
+        resource_admission_store: Any | None = None,
     ) -> None:
         self.started = False
         self._owners = 0
@@ -175,6 +184,11 @@ class InMemoryTransport(JobBackend):
                 clock=discovery_clock,
             )
         self.discovery_backend = discovery_store
+        if resource_admission_store is None:
+            from superjobs.resources.memory import InMemoryResourceAdmissionStore
+
+            resource_admission_store = InMemoryResourceAdmissionStore()
+        self.resource_admission_store = resource_admission_store
         self.ack_log: list[tuple[str, int, JobState]] = []
         self.retry_log: list[tuple[str, int]] = []
         self.reject_log: list[tuple[str, int, str | None]] = []
@@ -191,13 +205,21 @@ class InMemoryTransport(JobBackend):
             str,
             set[asyncio.Queue[JobEvent[Any] | None]],
         ] = defaultdict(set)
-        self._status_events: defaultdict[str, asyncio.Event] = defaultdict(asyncio.Event)
-        self._execution_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self._observation_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._status_events: defaultdict[str, asyncio.Event] = defaultdict(
+            asyncio.Event
+        )
+        self._execution_locks: defaultdict[str, asyncio.Lock] = defaultdict(
+            asyncio.Lock
+        )
+        self._observation_locks: defaultdict[str, asyncio.Lock] = defaultdict(
+            asyncio.Lock
+        )
         self._observation_sequences: defaultdict[str, int] = defaultdict(int)
         self._retry_tasks: set[asyncio.Task[None]] = set()
         self._deadline_tasks: dict[str, asyncio.Task[None]] = {}
-        self._cancel_events: defaultdict[str, asyncio.Event] = defaultdict(asyncio.Event)
+        self._cancel_events: defaultdict[str, asyncio.Event] = defaultdict(
+            asyncio.Event
+        )
 
     async def start(self) -> None:
         self._owners += 1
@@ -450,6 +472,8 @@ class InMemoryTransport(JobBackend):
         result_payload: bytes = b"",
         result_media_type: str | None = None,
         error: JobError | None = None,
+        expected_admission_owner: AdmissionOwner | None = None,
+        only_if_waiting: bool = False,
     ) -> ExecutionRecord:
         if (
             state is JobState.COMPLETED
@@ -457,21 +481,43 @@ class InMemoryTransport(JobBackend):
             and len(result_payload) > self.max_result_bytes
         ):
             raise ResultTooLargeError(
-                f"Result is larger than the configured {self.max_result_bytes}-byte limit",
+                f"Result is larger than the configured {self.max_result_bytes}-byte limit"
             )
         async with self._execution_locks[execution.job_id]:
-            if execution.state in {
+            current = self._executions[execution.job_id]
+            stored = admission_owner_from_wire(current.admission_owner_wire)
+            if expected_admission_owner is not None:
+                if stored != expected_admission_owner:
+                    raise ResourceStaleOperationError(
+                        "completion ownership token is stale"
+                    )
+                await ResourceAdmission(
+                    self.resource_admission_store
+                ).assert_execution_owner(expected_admission_owner)
+            elif stored is not None and not only_if_waiting:
+                raise ResourceStaleOperationError(
+                    "completion requires the owning invocation token"
+                )
+            if current.state in {
                 JobState.COMPLETED,
                 JobState.FAILED,
                 JobState.CANCELLED,
             }:
+                execution.__dict__.update(current.__dict__)
                 return execution
-            execution.state = state
-            execution.completed_at = datetime.now(UTC)
-            execution.result_payload = result_payload
-            execution.result_media_type = result_media_type
-            execution.error = error
-            execution.next_attempt_at = None
+            if only_if_waiting and current.state not in {
+                JobState.PENDING,
+                JobState.WAITING_FOR_RESOURCE,
+            }:
+                execution.__dict__.update(current.__dict__)
+                return execution
+            current.state = state
+            current.completed_at = datetime.now(UTC)
+            current.result_payload = result_payload
+            current.result_media_type = result_media_type
+            current.error = error
+            current.next_attempt_at = None
+            execution.__dict__.update(current.__dict__)
             self._status_events[execution.job_id].set()
         return execution
 
@@ -786,41 +832,76 @@ class InMemoryTransport(JobBackend):
             }:
                 execution.terminal_event_published = False
 
-    async def mark_started(self, execution: ExecutionRecord, attempt: int) -> None:
-        terminal_event: JobFailed | JobCancelled | None = None
+    async def mark_started(
+        self,
+        execution: ExecutionRecord,
+        attempt: int,
+        *,
+        expected_admission_owner: AdmissionOwner | None = None,
+        target_state: JobState = JobState.RUNNING,
+        admission_owner: AdmissionOwner | None = None,
+    ) -> None:
+        terminal_event = None
         async with self._execution_locks[execution.job_id]:
-            if execution.state in {
+            current = self._executions[execution.job_id]
+            if current.state in {
                 JobState.COMPLETED,
                 JobState.FAILED,
                 JobState.CANCELLED,
             }:
+                execution.__dict__.update(current.__dict__)
                 return
-            if execution.cancellation_requested:
-                execution.state = JobState.CANCELLED
-                execution.completed_at = datetime.now(UTC)
-                execution.error = JobError(
+            if target_state is JobState.WAITING_FOR_RESOURCE and current.state not in {
+                JobState.PENDING,
+                JobState.WAITING_FOR_RESOURCE,
+            }:
+                execution.__dict__.update(current.__dict__)
+                return
+            if admission_owner is not None:
+                await ResourceAdmission(
+                    self.resource_admission_store
+                ).assert_owner_active(admission_owner)
+                current.admission_owner_wire = admission_owner_to_wire(admission_owner)
+            elif expected_admission_owner is not None:
+                if (
+                    admission_owner_from_wire(current.admission_owner_wire)
+                    != expected_admission_owner
+                ):
+                    raise ResourceStaleOperationError("start ownership token is stale")
+                await ResourceAdmission(
+                    self.resource_admission_store
+                ).assert_execution_owner(expected_admission_owner)
+            elif (
+                target_state is JobState.RUNNING
+                and current.admission_owner_wire is not None
+            ):
+                raise ResourceStaleOperationError(
+                    "start requires the owning invocation token"
+                )
+            if current.cancellation_requested:
+                current.state = JobState.CANCELLED
+                current.completed_at = datetime.now(UTC)
+                current.error = JobError(
                     code="cancelled",
                     message="Cancellation requested before the Attempt started",
                 )
-                terminal_event = JobCancelled(reason=execution.error.message)
-            elif (
-                execution.deadline is not None
-                and datetime.now(UTC) >= execution.deadline
-            ):
-                execution.state = JobState.FAILED
-                execution.completed_at = datetime.now(UTC)
-                execution.error = JobError(
+                terminal_event = JobCancelled(reason=current.error.message)
+            elif current.deadline is not None and datetime.now(UTC) >= current.deadline:
+                current.state = JobState.FAILED
+                current.completed_at = datetime.now(UTC)
+                current.error = JobError(
                     code="deadline_exceeded",
                     message="The execution deadline was exceeded before starting",
                 )
-                terminal_event = JobFailed(error=execution.error)
+                terminal_event = JobFailed(error=current.error)
             else:
-                execution.state = JobState.RUNNING
-                execution.attempt = attempt
-                execution.started_at = execution.started_at or datetime.now(UTC)
-                execution.next_attempt_at = None
-            if terminal_event is None:
-                self._status_events[execution.job_id].set()
+                current.state = target_state
+                current.attempt = attempt
+                if target_state is JobState.RUNNING:
+                    current.started_at = current.started_at or datetime.now(UTC)
+                current.next_attempt_at = None
+            execution.__dict__.update(current.__dict__)
+            self._status_events[execution.job_id].set()
         if terminal_event is not None:
             await self._append_terminal(execution, terminal_event)
 
@@ -844,24 +925,41 @@ class InMemoryTransport(JobBackend):
         execution: ExecutionRecord,
         *,
         next_attempt_at: datetime | None,
+        expected_admission_owner: AdmissionOwner | None = None,
     ) -> None:
-        if execution.state in {
-            JobState.COMPLETED,
-            JobState.FAILED,
-            JobState.CANCELLED,
-        }:
-            return
-        if execution.cancellation_requested:
-            execution.state = JobState.CANCELLED
-            execution.completed_at = datetime.now(UTC)
-            execution.next_attempt_at = None
-            execution.progress = None
-            execution.error = JobError(
-                code="cancelled",
-                message="Cancellation requested while the Attempt was failing",
-            )
-        else:
-            execution.state = JobState.PENDING
-            execution.next_attempt_at = next_attempt_at
-            execution.progress = None
+        async with self._execution_locks[execution.job_id]:
+            current = self._executions[execution.job_id]
+            if expected_admission_owner is not None:
+                if (
+                    admission_owner_from_wire(current.admission_owner_wire)
+                    != expected_admission_owner
+                ):
+                    raise ResourceStaleOperationError("retry ownership token is stale")
+                await ResourceAdmission(
+                    self.resource_admission_store
+                ).assert_execution_owner(expected_admission_owner)
+            elif current.admission_owner_wire is not None:
+                raise ResourceStaleOperationError(
+                    "retry requires the owning invocation token"
+                )
+            if current.state in {
+                JobState.COMPLETED,
+                JobState.FAILED,
+                JobState.CANCELLED,
+            }:
+                execution.__dict__.update(current.__dict__)
+                return
+            if current.cancellation_requested:
+                current.state = JobState.CANCELLED
+                current.completed_at = datetime.now(UTC)
+                current.next_attempt_at = None
+                current.error = JobError(
+                    code="cancelled",
+                    message="Cancellation requested while the Attempt was failing",
+                )
+            else:
+                current.state = JobState.PENDING
+                current.next_attempt_at = next_attempt_at
+            current.progress = None
+            execution.__dict__.update(current.__dict__)
             self._status_events[execution.job_id].set()

@@ -13,7 +13,12 @@ import msgpack
 from faststream.nats import JStream, NatsBroker
 from faststream.nats.subscriber.usecases import LogicSubscriber
 from nats.js.api import KeyValueConfig
-from nats.js.errors import APIError, NoKeysError, NotFoundError
+from nats.js.errors import (
+    APIError,
+    KeyWrongLastSequenceError,
+    NoKeysError,
+    NotFoundError,
+)
 
 from superjobs.discovery.config import PresenceConfig
 from superjobs.discovery.nats import NatsDiscoveryBackend
@@ -35,6 +40,15 @@ from superjobs.jobs.events import (
 from superjobs.jobs.execution import JobError, JobState, JobStatus, ProgressSnapshot
 from superjobs.jobs.job_identity import JobIdentity
 from superjobs.jobs.retention import ObservationRetention, ResultRetention
+from superjobs.resources.errors import ResourceStaleOperationError
+from superjobs.resources.models import AdmissionOwner
+from superjobs.resources.nats import NatsResourceAdmissionStore
+from superjobs.runtime_resources import resource_admission_for_backend
+from superjobs.transport.admission_record import (
+    admission_owner_from_wire,
+    admission_owner_to_wire,
+    admission_owners_match,
+)
 from superjobs.transport.backend import (
     ExecutionRecord,
     JobBackend,
@@ -51,6 +65,8 @@ logger = logging.getLogger(__name__)
 # indefinitely across broker loss. Use get_one with a bounded wait instead.
 _WORK_PULL_FETCH_TIMEOUT_SECONDS = 2.0
 _WORK_PULL_IDLE_SLEEP_SECONDS = 0.05
+_COMPLETION_CAS_ATTEMPTS = 8
+_WAITING_OR_PENDING = frozenset({JobState.PENDING, JobState.WAITING_FOR_RESOURCE})
 
 
 class _NatsWorkSubscription(WorkSubscription):
@@ -110,15 +126,20 @@ class _NatsWorkSubscription(WorkSubscription):
                     if remaining > 0:
                         await message.nack(delay=remaining)
                         continue
-                delivery_count = getattr(
-                    getattr(message, "metadata", None),
-                    "num_delivered",
-                    1,
-                )
-                attempt = max(
-                    int(wire.get("attempt", 1)),
-                    int(delivery_count or 1),
-                )
+                if getattr(self._backend, "_is_resource_job", lambda identity: False)(
+                    self._identity
+                ):
+                    attempt = int(wire.get("attempt", 1))
+                else:
+                    delivery_count = getattr(
+                        getattr(message, "metadata", None),
+                        "num_delivered",
+                        1,
+                    )
+                    attempt = max(
+                        int(wire.get("attempt", 1)),
+                        int(delivery_count or 1),
+                    )
                 if self._closed:
                     raise StopAsyncIteration
                 return WorkItem(
@@ -245,12 +266,20 @@ class NatsJobBackend(JobBackend):
         self.heartbeat_interval = max(0.001, ack_wait / 3)
         self._observation_lock_ttl = max(1.0, ack_wait)
         self.observation_retention = ObservationRetention(
-            max_age=(timedelta(seconds=self.queue_config.observation_max_age) if self.queue_config.observation_max_age is not None else None),
+            max_age=(
+                timedelta(seconds=self.queue_config.observation_max_age)
+                if self.queue_config.observation_max_age is not None
+                else None
+            ),
             max_events=self.queue_config.observation_max_msgs,
             max_bytes=self.queue_config.observation_max_bytes,
         )
         self.result_retention = ResultRetention(
-            max_age=(timedelta(seconds=self.queue_config.result_max_age) if self.queue_config.result_max_age is not None else None),
+            max_age=(
+                timedelta(seconds=self.queue_config.result_max_age)
+                if self.queue_config.result_max_age is not None
+                else None
+            ),
         )
         self.max_result_bytes = self.queue_config.max_result_bytes
         self.started = False
@@ -263,6 +292,17 @@ class NatsJobBackend(JobBackend):
         self._observation_locks: defaultdict[str, asyncio.Lock] = defaultdict(
             asyncio.Lock,
         )
+        self._resource_jobs: set[str] = set()
+        self.resource_admission_store = NatsResourceAdmissionStore(
+            broker,
+            subject_prefix=self.queue_config.subject_prefix,
+        )
+
+    def register_resource_job(self, identity: JobIdentity) -> None:
+        self._resource_jobs.add(identity.canonical_name)
+
+    def _is_resource_job(self, identity: JobIdentity) -> bool:
+        return identity.canonical_name in self._resource_jobs
 
     def register_job(self, job) -> None:
         existing = self._jobs.get(job.canonical_name)
@@ -322,7 +362,7 @@ class NatsJobBackend(JobBackend):
             if entry.value is None:
                 continue
             record = _record_from_wire(_unpack(entry.value))
-            if record.state is JobState.PENDING and record.deadline is not None:
+            if record.deadline is not None and self._deadline_may_enforce(record):
                 self._schedule_deadline(record)
 
     async def stop(self) -> None:
@@ -343,6 +383,7 @@ class NatsJobBackend(JobBackend):
         self._deadline_tasks.clear()
         await self._transport.stop()
         self.discovery_backend.invalidate()
+        self.resource_admission_store.invalidate()
         self.started = False
 
     async def _ensure_kv(self, bucket: str):
@@ -373,6 +414,63 @@ class NatsJobBackend(JobBackend):
             return True
         except APIError:
             return False
+
+    def _execution_has_active_admission_owner(self, record: ExecutionRecord) -> bool:
+        return admission_owner_from_wire(record.admission_owner_wire) is not None
+
+    def _deadline_may_enforce(self, record: ExecutionRecord) -> bool:
+        if record.state not in _WAITING_OR_PENDING:
+            return False
+        return not self._execution_has_active_admission_owner(record)
+
+    async def _assert_execution_owner(self, owner: AdmissionOwner) -> None:
+        admission = resource_admission_for_backend(self)
+        if admission is None:
+            raise ResourceStaleOperationError("resource admission is not available")
+        await admission.assert_execution_owner(owner)
+
+    async def _cas_update_completion(
+        self,
+        job_id: str,
+        identity: JobIdentity,
+        mutate: Any,
+    ) -> ExecutionRecord:
+        completion_kv = self._completion_kv
+        if completion_kv is None:
+            raise RuntimeError("NATS backend is not started")
+        key = self._execution_key(job_id)
+        admission = resource_admission_for_backend(self)
+        for _ in range(_COMPLETION_CAS_ATTEMPTS):
+            entry = await completion_kv.get(key)
+            if entry.value is None:
+                raise KeyError(job_id)
+            current = _record_from_wire(_unpack(entry.value))
+            if current.identity != identity:
+                raise KeyError(job_id)
+            revision = entry.revision
+            updated, write, owner_active, owner_execution = mutate(current)
+            if not write:
+                return updated
+            if owner_active is not None:
+                if admission is None:
+                    raise ResourceStaleOperationError(
+                        "resource admission is not available",
+                    )
+                await admission.assert_owner_active(owner_active)
+            if owner_execution is not None:
+                await self._assert_execution_owner(owner_execution)
+            try:
+                await completion_kv.update(
+                    key,
+                    _pack(_record_to_wire(updated)),
+                    last=revision,
+                )
+            except KeyWrongLastSequenceError:
+                continue
+            return updated
+        raise ResourceStaleOperationError(
+            f"completion record compare-and-set retries exhausted for {job_id}",
+        )
 
     async def submit(
         self,
@@ -566,7 +664,7 @@ class NatsJobBackend(JobBackend):
     def _schedule_deadline(self, execution: ExecutionRecord) -> None:
         if not self.started or execution.deadline is None:
             return
-        if execution.state is not JobState.PENDING:
+        if not self._deadline_may_enforce(execution):
             return
         existing = self._deadline_tasks.get(execution.job_id)
         if existing is not None and not existing.done():
@@ -589,7 +687,9 @@ class NatsJobBackend(JobBackend):
                     if entry.value is None:
                         return
                     current = _record_from_wire(_unpack(entry.value))
-                    if current.state is not JobState.PENDING or current.deadline is None:
+                    if current.deadline is None or not self._deadline_may_enforce(
+                        current
+                    ):
                         return
                     if datetime.now(UTC) < current.deadline:
                         await asyncio.sleep(
@@ -608,8 +708,10 @@ class NatsJobBackend(JobBackend):
                             _pack(_record_to_wire(current)),
                             last=entry.revision,
                         )
-                    except APIError:
+                    except KeyWrongLastSequenceError:
                         continue
+                    except APIError:
+                        raise
                     await self._append_terminal_event(
                         current,
                         JobFailed(error=current.error),
@@ -629,7 +731,11 @@ class NatsJobBackend(JobBackend):
         )
         self._deadline_tasks[execution.job_id] = task
         task.add_done_callback(
-            lambda completed: self._deadline_tasks.pop(execution.job_id, None) if self._deadline_tasks.get(execution.job_id) is completed else None,
+            lambda completed: (
+                self._deadline_tasks.pop(execution.job_id, None)
+                if self._deadline_tasks.get(execution.job_id) is completed
+                else None
+            ),
         )
 
     async def write_completion(
@@ -640,45 +746,56 @@ class NatsJobBackend(JobBackend):
         result_payload: bytes = b"",
         result_media_type: str | None = None,
         error: JobError | None = None,
+        expected_admission_owner: AdmissionOwner | None = None,
+        only_if_waiting: bool = False,
     ) -> ExecutionRecord:
-        if state is JobState.COMPLETED and self.max_result_bytes is not None and len(result_payload) > self.max_result_bytes:
+        if (
+            state is JobState.COMPLETED
+            and self.max_result_bytes is not None
+            and len(result_payload) > self.max_result_bytes
+        ):
             raise ResultTooLargeError(
                 f"Result is larger than the configured {self.max_result_bytes}-byte limit",
             )
-        completion_kv = self._completion_kv
-        if completion_kv is None:
-            raise RuntimeError("NATS backend is not started")
-        key = self._execution_key(execution.job_id)
-        while True:
-            entry = await completion_kv.get(key)
-            if entry.value is None:
-                raise KeyError(execution.job_id)
-            current = _record_from_wire(_unpack(entry.value))
-            if current.identity != execution.identity:
-                raise KeyError(execution.job_id)
+
+        def mutate(
+            current: ExecutionRecord,
+        ) -> tuple[ExecutionRecord, bool, AdmissionOwner | None, AdmissionOwner | None]:
+            if only_if_waiting and current.state not in _WAITING_OR_PENDING:
+                return current, False, None, None
             if current.state in {
                 JobState.COMPLETED,
                 JobState.FAILED,
                 JobState.CANCELLED,
             }:
-                execution.__dict__.update(current.__dict__)
-                return current
+                return current, False, None, None
+            stored = admission_owner_from_wire(current.admission_owner_wire)
+            owner_execution: AdmissionOwner | None = None
+            if expected_admission_owner is not None:
+                if not admission_owners_match(stored, expected_admission_owner):
+                    raise ResourceStaleOperationError(
+                        "completion admission owner token does not match the execution record",
+                    )
+                owner_execution = expected_admission_owner
+            elif stored is not None and not (
+                only_if_waiting and current.state in _WAITING_OR_PENDING
+            ):
+                return current, False, None, None
             current.state = state
             current.completed_at = datetime.now(UTC)
             current.result_payload = result_payload
             current.result_media_type = result_media_type
             current.error = error
             current.next_attempt_at = None
-            try:
-                await completion_kv.update(
-                    key,
-                    _pack(_record_to_wire(current)),
-                    last=entry.revision,
-                )
-            except APIError:
-                continue
-            execution.__dict__.update(current.__dict__)
-            return current
+            return current, True, None, owner_execution
+
+        updated = await self._cas_update_completion(
+            execution.job_id,
+            execution.identity,
+            mutate,
+        )
+        execution.__dict__.update(updated.__dict__)
+        return updated
 
     async def request_cancel(self, identity: JobIdentity, job_id: str) -> JobStatus:
         completion_kv = self._completion_kv
@@ -1112,28 +1229,34 @@ class NatsJobBackend(JobBackend):
     async def signal_status(self, job_id: str) -> None:
         return
 
-    async def mark_started(self, execution: ExecutionRecord, attempt: int) -> None:
-        completion_kv = self._completion_kv
-        if completion_kv is None:
-            raise RuntimeError("NATS backend is not started")
-        key = self._execution_key(execution.job_id)
-        while True:
-            entry = await completion_kv.get(key)
-            if entry.value is None:
-                raise KeyError(execution.job_id)
-            current = _record_from_wire(_unpack(entry.value))
-            if current.identity != execution.identity:
-                raise KeyError(execution.job_id)
+    async def mark_started(
+        self,
+        execution: ExecutionRecord,
+        attempt: int,
+        *,
+        expected_admission_owner: AdmissionOwner | None = None,
+        target_state: JobState = JobState.RUNNING,
+        admission_owner: AdmissionOwner | None = None,
+    ) -> None:
+        terminal_event: JobFailed | JobCancelled | None = None
+
+        def mutate(
+            current: ExecutionRecord,
+        ) -> tuple[ExecutionRecord, bool, AdmissionOwner | None, AdmissionOwner | None]:
+            nonlocal terminal_event
             if current.state in {
                 JobState.COMPLETED,
                 JobState.FAILED,
                 JobState.CANCELLED,
             }:
-                execution.__dict__.update(current.__dict__)
-                return
-
-            terminal_event: JobFailed | JobCancelled | None = None
-            if current.cancellation_requested:
+                return current, False, None, None
+            if expected_admission_owner is not None:
+                stored = admission_owner_from_wire(current.admission_owner_wire)
+                if not admission_owners_match(stored, expected_admission_owner):
+                    raise ResourceStaleOperationError(
+                        "mark_started admission owner token does not match the execution record",
+                    )
+            if current.cancellation_requested and current.state in _WAITING_OR_PENDING:
                 current.state = JobState.CANCELLED
                 current.completed_at = datetime.now(UTC)
                 current.error = JobError(
@@ -1141,7 +1264,12 @@ class NatsJobBackend(JobBackend):
                     message="Cancellation requested before the Attempt started",
                 )
                 terminal_event = JobCancelled(reason=current.error.message)
-            elif current.deadline is not None and datetime.now(UTC) >= current.deadline:
+                return current, True, None, None
+            if (
+                self._deadline_may_enforce(current)
+                and current.deadline is not None
+                and datetime.now(UTC) >= current.deadline
+            ):
                 current.state = JobState.FAILED
                 current.completed_at = datetime.now(UTC)
                 current.error = JobError(
@@ -1149,23 +1277,46 @@ class NatsJobBackend(JobBackend):
                     message="The execution deadline was exceeded before starting",
                 )
                 terminal_event = JobFailed(error=current.error)
-            else:
+                return current, True, None, None
+            if target_state is JobState.WAITING_FOR_RESOURCE:
+                if current.state is JobState.RUNNING:
+                    return current, False, None, None
+                if current.state not in _WAITING_OR_PENDING:
+                    return current, False, None, None
+                current.state = JobState.WAITING_FOR_RESOURCE
+                current.attempt = attempt
+                current.next_attempt_at = None
+                return current, True, None, None
+            if target_state is JobState.RUNNING:
+                owner_active = admission_owner
+                if admission_owner is None and current.admission_owner_wire is not None:
+                    raise ResourceStaleOperationError(
+                        "start requires the owning invocation token"
+                    )
                 current.state = JobState.RUNNING
                 current.attempt = attempt
                 current.started_at = current.started_at or datetime.now(UTC)
                 current.next_attempt_at = None
-            try:
-                await completion_kv.update(
-                    key,
-                    _pack(_record_to_wire(current)),
-                    last=entry.revision,
-                )
-            except APIError:
-                continue
-            execution.__dict__.update(current.__dict__)
-            if terminal_event is not None:
-                await self._append_terminal_event(execution, terminal_event)
-            return
+                if admission_owner is not None:
+                    current.admission_owner_wire = admission_owner_to_wire(
+                        admission_owner,
+                    )
+                return current, True, owner_active, None
+            current.state = target_state
+            current.attempt = attempt
+            if target_state is JobState.RUNNING:
+                current.started_at = current.started_at or datetime.now(UTC)
+            current.next_attempt_at = None
+            return current, True, None, None
+
+        updated = await self._cas_update_completion(
+            execution.job_id,
+            execution.identity,
+            mutate,
+        )
+        execution.__dict__.update(updated.__dict__)
+        if terminal_event is not None:
+            await self._append_terminal_event(execution, terminal_event)
 
     async def update_progress(
         self,
@@ -1207,25 +1358,27 @@ class NatsJobBackend(JobBackend):
         execution: ExecutionRecord,
         *,
         next_attempt_at: datetime | None,
+        expected_admission_owner: AdmissionOwner | None = None,
     ) -> None:
-        completion_kv = self._completion_kv
-        if completion_kv is None:
-            raise RuntimeError("NATS backend is not started")
-        key = self._execution_key(execution.job_id)
-        while True:
-            entry = await completion_kv.get(key)
-            if entry.value is None:
-                raise KeyError(execution.job_id)
-            current = _record_from_wire(_unpack(entry.value))
-            if current.identity != execution.identity:
-                raise KeyError(execution.job_id)
+        def mutate(
+            current: ExecutionRecord,
+        ) -> tuple[ExecutionRecord, bool, AdmissionOwner | None, AdmissionOwner | None]:
             if current.state in {
                 JobState.COMPLETED,
                 JobState.FAILED,
                 JobState.CANCELLED,
             }:
-                execution.__dict__.update(current.__dict__)
-                return
+                return current, False, None, None
+            owner_execution: AdmissionOwner | None = None
+            if expected_admission_owner is not None:
+                stored = admission_owner_from_wire(current.admission_owner_wire)
+                if not admission_owners_match(stored, expected_admission_owner):
+                    raise ResourceStaleOperationError(
+                        "mark_retry admission owner token does not match the execution record",
+                    )
+                owner_execution = expected_admission_owner
+            elif self._execution_has_active_admission_owner(current):
+                return current, False, None, None
             if current.cancellation_requested:
                 current.state = JobState.CANCELLED
                 current.completed_at = datetime.now(UTC)
@@ -1239,16 +1392,14 @@ class NatsJobBackend(JobBackend):
                 current.state = JobState.PENDING
                 current.next_attempt_at = next_attempt_at
                 current.progress = None
-            try:
-                await completion_kv.update(
-                    key,
-                    _pack(_record_to_wire(current)),
-                    last=entry.revision,
-                )
-            except APIError:
-                continue
-            execution.__dict__.update(current.__dict__)
-            return
+            return current, True, None, owner_execution
+
+        updated = await self._cas_update_completion(
+            execution.job_id,
+            execution.identity,
+            mutate,
+        )
+        execution.__dict__.update(updated.__dict__)
 
     async def _publisher(self, subject: str, stream: str):
         key = f"{stream}:{subject}"
@@ -1330,9 +1481,13 @@ def _record_to_wire(record: ExecutionRecord) -> dict[str, Any]:
             else None
         ),
         "started_at": record.started_at.isoformat() if record.started_at else None,
-        "completed_at": (record.completed_at.isoformat() if record.completed_at else None),
+        "completed_at": (
+            record.completed_at.isoformat() if record.completed_at else None
+        ),
         "cancellation_requested": record.cancellation_requested,
-        "next_attempt_at": (record.next_attempt_at.isoformat() if record.next_attempt_at else None),
+        "next_attempt_at": (
+            record.next_attempt_at.isoformat() if record.next_attempt_at else None
+        ),
         "result_payload": record.result_payload,
         "result_media_type": record.result_media_type,
         "error": record.error.to_wire() if record.error else None,
@@ -1340,7 +1495,12 @@ def _record_to_wire(record: ExecutionRecord) -> dict[str, Any]:
         "terminal_event_published": record.terminal_event_published,
         "published": record.published,
         "observation_lock_token": record.observation_lock_token,
-        "observation_lock_expires_at": (record.observation_lock_expires_at.isoformat() if record.observation_lock_expires_at else None),
+        "observation_lock_expires_at": (
+            record.observation_lock_expires_at.isoformat()
+            if record.observation_lock_expires_at
+            else None
+        ),
+        "admission_owner_wire": record.admission_owner_wire,
     }
 
 
@@ -1356,15 +1516,33 @@ def _record_from_wire(value: dict[str, Any]) -> ExecutionRecord:
         idempotency_key=value["idempotency_key"],
         caller_scope=value.get("caller_scope", "default"),
         timeout=value.get("timeout"),
-        deadline=(datetime.fromisoformat(value["deadline"]) if value.get("deadline") else None),
+        deadline=(
+            datetime.fromisoformat(value["deadline"]) if value.get("deadline") else None
+        ),
         created_at=datetime.fromisoformat(value["created_at"]),
         state=JobState(value["state"]),
         attempt=int(value.get("attempt", 0)),
-        progress=(ProgressSnapshot(progress["completed"], progress.get("total")) if progress else None),
-        started_at=(datetime.fromisoformat(value["started_at"]) if value.get("started_at") else None),
-        completed_at=(datetime.fromisoformat(value["completed_at"]) if value.get("completed_at") else None),
+        progress=(
+            ProgressSnapshot(progress["completed"], progress.get("total"))
+            if progress
+            else None
+        ),
+        started_at=(
+            datetime.fromisoformat(value["started_at"])
+            if value.get("started_at")
+            else None
+        ),
+        completed_at=(
+            datetime.fromisoformat(value["completed_at"])
+            if value.get("completed_at")
+            else None
+        ),
         cancellation_requested=bool(value.get("cancellation_requested", False)),
-        next_attempt_at=(datetime.fromisoformat(value["next_attempt_at"]) if value.get("next_attempt_at") else None),
+        next_attempt_at=(
+            datetime.fromisoformat(value["next_attempt_at"])
+            if value.get("next_attempt_at")
+            else None
+        ),
         result_payload=value.get("result_payload", b""),
         result_media_type=value.get("result_media_type"),
         error=JobError.from_wire(error) if error else None,
@@ -1374,7 +1552,12 @@ def _record_from_wire(value: dict[str, Any]) -> ExecutionRecord:
         ),
         published=bool(value.get("published", False)),
         observation_lock_token=value.get("observation_lock_token"),
-        observation_lock_expires_at=(datetime.fromisoformat(value["observation_lock_expires_at"]) if value.get("observation_lock_expires_at") else None),
+        observation_lock_expires_at=(
+            datetime.fromisoformat(value["observation_lock_expires_at"])
+            if value.get("observation_lock_expires_at")
+            else None
+        ),
+        admission_owner_wire=value.get("admission_owner_wire"),
     )
 
 

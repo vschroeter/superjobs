@@ -23,6 +23,10 @@ from superjobs.jobs.events import (
 from superjobs.jobs.execution import JobError, JobState
 from superjobs.jobs.job_context import JobContext, ObservationPolicy
 from superjobs.jobs.retry_policy import RetryPolicy
+from superjobs.jobs.admission_execution import (
+    ResourceHandlerConfig,
+    process_resource_bound_item,
+)
 from superjobs.transport.backend import ExecutionRecord, JobBackend, WorkItem
 
 
@@ -40,6 +44,7 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         retry: RetryPolicy | None = None,
         observation_policy: ObservationPolicy | None = None,
         heartbeat_interval: float | None = None,
+        resource_config: ResourceHandlerConfig | None = None,
     ):
         if concurrency < 1:
             raise ValueError("concurrency must be at least one")
@@ -57,6 +62,12 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         self.retry_policy = retry or RetryPolicy()
         self.observation_policy = observation_policy or ObservationPolicy()
         self.heartbeat_interval = effective_heartbeat_interval
+        self._resource_config = resource_config
+        if resource_config is not None:
+            register_resource_job = getattr(backend, "register_resource_job", None)
+            if register_resource_job is not None:
+                register_resource_job(job.identity)
+        self._resource_admission_blocked = False
 
         self.request_subscriber = None
         self._start_task: asyncio.Task[None] | None = None
@@ -71,8 +82,11 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
             if self._consumer_task is not None and not self._consumer_task.done():
                 return
             self._stop_event.clear()
+            self._resource_admission_blocked = False
             self._ready_event.clear()
-            self.request_subscriber = await self.backend.subscribe_work(self.job.identity)
+            self.request_subscriber = await self.backend.subscribe_work(
+                self.job.identity
+            )
             self._consumer_task = asyncio.create_task(
                 self._consume(),
                 name=f"superjobs-consumer-{self.job.canonical_name}",
@@ -143,12 +157,16 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
             raise RuntimeError(f"Job handler for {self.job} has not been started")
         await self._ready_event.wait()
 
+    def block_new_resource_admission(self) -> None:
+        self._resource_admission_blocked = True
+        self._stop_event.set()
+
     async def _consume(self) -> None:
         if self.request_subscriber is None:
             raise RuntimeError("Job subscriber is not initialized")
         try:
             async for item in self.request_subscriber:
-                if self._stop_event.is_set():
+                if self._stop_event.is_set() or self._resource_admission_blocked:
                     return
                 await self._dispatch(item)
         except asyncio.CancelledError:
@@ -178,14 +196,15 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
         try:
             await self._process_item(item)
         except asyncio.CancelledError:
-            try:
-                await self.backend.mark_retry(
-                    item.execution,
-                    next_attempt_at=None,
-                )
-                await item.delivery.retry(attempt=item.attempt + 1)
-            except Exception:
-                logger.exception("Unable to retry cancelled Attempt")
+            if self._resource_config is None:
+                try:
+                    await self.backend.mark_retry(
+                        item.execution,
+                        next_attempt_at=None,
+                    )
+                    await item.delivery.retry(attempt=item.attempt + 1)
+                except Exception:
+                    logger.exception("Unable to retry cancelled Attempt")
             raise
         except Exception:
             logger.exception(
@@ -197,6 +216,9 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
             semaphore.release()
 
     async def _process_item(self, item: WorkItem) -> None:
+        if self._resource_config is not None:
+            await process_resource_bound_item(self, item, self._resource_config)
+            return
         execution = item.execution
         attempt = item.attempt
         if execution.state in {
@@ -248,7 +270,10 @@ class JobHandler[ReqT: Any | None, FinalT: Any | None, InterT: Any | None]:
             try:
                 await self._append_system_event(execution, attempt, JobStarted())
             except Exception:
-                logger.exception("Unable to publish JobStarted for %s", execution.job_id)
+                logger.exception(
+                    "Unable to publish JobStarted for %s", execution.job_id
+                )
+
             async def invoke_callback() -> Any:
                 arguments = (
                     (request, context)

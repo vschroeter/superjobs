@@ -14,6 +14,7 @@ from superjobs.jobs.execution import (
 )
 from superjobs.jobs.job_identity import JobIdentity
 from superjobs.transport.delivery import Delivery
+from superjobs.resources.models import AdmissionOwner
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +53,7 @@ class ExecutionRecord:
     published: bool = False
     observation_lock_token: str | None = None
     observation_lock_expires_at: datetime | None = None
+    admission_owner_wire: dict[str, Any] | None = None
 
     def status(self) -> JobStatus:
         return JobStatus(
@@ -122,6 +124,8 @@ class ExecutionStore(Protocol):
         result_payload: bytes = b"",
         result_media_type: str | None = None,
         error: JobError | None = None,
+        expected_admission_owner: AdmissionOwner | None = None,
+        only_if_waiting: bool = False,
     ) -> ExecutionRecord: ...
 
     async def request_cancel(self, identity: JobIdentity, job_id: str) -> JobStatus: ...
@@ -130,7 +134,15 @@ class ExecutionStore(Protocol):
 
     async def wait_for_cancellation(self, job_id: str) -> None: ...
 
-    async def mark_started(self, execution: ExecutionRecord, attempt: int) -> None: ...
+    async def mark_started(
+        self,
+        execution: ExecutionRecord,
+        attempt: int,
+        *,
+        expected_admission_owner: AdmissionOwner | None = None,
+        target_state: JobState = JobState.RUNNING,
+        admission_owner: AdmissionOwner | None = None,
+    ) -> None: ...
 
     async def update_progress(
         self,
@@ -143,6 +155,7 @@ class ExecutionStore(Protocol):
         execution: ExecutionRecord,
         *,
         next_attempt_at: datetime | None,
+        expected_admission_owner: AdmissionOwner | None = None,
     ) -> None: ...
 
     async def wait_for_status(

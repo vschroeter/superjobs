@@ -71,9 +71,12 @@ TYPING_SUITES: tuple[TypingSuite, ...] = (
     TypingSuite("discovery_negative", "discovery_negative", ("check_types.py",), True),
     TypingSuite("worker_positive", "worker_positive", ("check_types.py",), False),
     TypingSuite("worker_negative", "worker_negative", ("check_types.py",), True),
+    TypingSuite("resource_positive", "resource_positive", ("check_types.py",), False),
+    TypingSuite("resource_negative", "resource_negative", ("check_types.py",), True),
 )
 
 RUNTIME_TEST_FILES = (
+    REPO_ROOT / "tests" / "test_resource_runtime_review.py",
     REPO_ROOT / "tests" / "test_discovery.py",
     REPO_ROOT / "tests" / "test_discovery_registry.py",
     REPO_ROOT / "tests" / "test_handler_registration.py",
@@ -94,6 +97,9 @@ RUNTIME_TEST_FILES = (
     REPO_ROOT / "tests" / "test_worker_presence_lifecycle.py",
     REPO_ROOT / "tests" / "test_worker_presence_review.py",
     REPO_ROOT / "tests" / "test_worker_import_probe.py",
+    REPO_ROOT / "tests" / "test_resource_admission_memory.py",
+    REPO_ROOT / "tests" / "test_resource_admission_safety.py",
+    REPO_ROOT / "tests" / "test_resource_admission_review.py",
 )
 
 
@@ -601,11 +607,22 @@ def run_runtime_tests(
         shutil.rmtree(runtime_dir)
     runtime_dir.mkdir(parents=True)
     (runtime_dir / "pytest.ini").write_text(
-        "[pytest]\nmarkers =\n    nats: tests requiring the owned NATS harness\n",
+        "[pytest]\n"
+        "markers =\n"
+        "    nats: tests requiring the owned NATS harness\n"
+        "asyncio_mode = auto\n"
+        "asyncio_default_fixture_loop_scope = function\n",
         encoding="utf-8",
     )
     for src in RUNTIME_TEST_FILES:
         shutil.copy2(src, runtime_dir / src.name)
+    safety_runtime = runtime_dir / "test_resource_admission_safety.py"
+    if safety_runtime.is_file():
+        memory_helpers = REPO_ROOT / "tests" / "test_resource_admission_memory.py"
+        tests_pkg = runtime_dir / "tests"
+        tests_pkg.mkdir(parents=True, exist_ok=True)
+        (tests_pkg / "__init__.py").write_text("", encoding="utf-8")
+        shutil.copy2(memory_helpers, tests_pkg / "test_resource_admission_memory.py")
     shutil.copy2(REPO_ROOT / "tests" / "conftest.py", runtime_dir / "conftest.py")
     shutil.copy2(REPO_ROOT / "examples/cli_registration/main.py", runtime_dir / "cli_registration_example.py")
     shutil.copy2(EXAMPLE_ROOT / "discovery_import_probe.py", runtime_dir / "discovery_import_probe.py")

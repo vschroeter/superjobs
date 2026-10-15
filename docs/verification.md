@@ -3,6 +3,62 @@
 Dated measured results. Commands and matrix: [development.md](development.md).
 This file records **what was run**, not product SLOs.
 
+## Resource admission (2026-10-15)
+
+Implementation for [issue #61](https://github.com/vschroeter/superjobs/issues/61),
+based on `62e60f8`. Cursor Composer 2.5 implemented bounded core, runtime, NATS,
+typing, documentation and process-verifier slices. Codex independently reviewed
+them and applied targeted runtime and verifier corrections after unsuccessful
+Cursor correction passes. Public interface and migration:
+[resource-admission.md](resource-admission.md); accepted safety trade-off:
+[ADR 0009](adr/0009-resource-admission-and-confirmed-recovery.md).
+
+| Check | Measured local result |
+| --- | --- |
+| Windows CPython 3.12 `dev_check full` | All **nine** stages passed, including the new required resource-admission process stage; 539.4 s overall |
+| Deterministic stage in that Windows run | **943 passed**, 2 existing platform/optional skips |
+| Linux/WSL CPython 3.14 initial `dev_check full` | First eight stages passed; resource-admission stage failed on the verifier's lost control message after broker restart; failed evidence retained |
+| Deterministic stage in that Linux run | **942 passed**, 3 existing platform/optional skips |
+| Source and installed-wheel public typing, both platforms above | All positive suites passed; exact resource negative set **12** diagnostics in both layouts; existing negative sets unchanged |
+| Installed runtime bundle in those runs | Windows **454 passed**; Linux **455 passed**; non-editable wheel origins and producer isolation verified |
+| Real NATS pytest in those runs | **61 passed**, no skips, per platform |
+| Corrected Linux CPython 3.14 process verifier | **4/4** scenarios passed after requiring an acknowledgement from the active invocation and handling the no-responder reconnect window |
+| Final focused admission checks, Windows CPython 3.13 | **29 passed**: uncertain submission, completion outages/lost acknowledgements, retries, duplicate cancellation, native timeout/shutdown, waiting deadlines, readiness withdrawal, fencing and verifier controls |
+| New implementation modules, pinned Pyright 1.1.414 | **15 files**, zero errors and warnings |
+| Broken required NATS control | Missing `NATS_EXECUTABLE`: exit **1**, visible setup error, no skip |
+
+The four installed-process scenarios use two independently installed workers and
+an independently installed producer/controller: different Job identities sharing
+one device, actual JetStream redelivery while the original invocation remains
+live, confirmed process-tree termination followed by recovery/stale-token
+rejection, and persistent-store broker restart with both original workers still
+alive. Maximum admitted model-load intervals were one. The redelivery scenario
+disables lease extension only in a worker test adapter to force actual broker
+redelivery; the library continues maintaining normal deliveries.
+
+Independent regressions first reproduced reset generations, interrupted recovery,
+claim-revision reuse after deletion, result abandonment during completion outage,
+and same-owner heartbeat/CAS conflicts. Their corrections are retained in the
+test suite. A blanket optional pytest timeout also interrupted a longer existing
+subprocess test; the canonical gate uses its existing per-stage/process bounds.
+Failures were diagnosed and preserved, not retried without changes.
+
+Local evidence (gitignored):
+`dist/implementation/resource-admission/windows-full-312/`,
+`linux-full-314/` (failed resource stage), `linux-process-final/`,
+`process-windows-reconciled/`, `final-acceptance.log`,
+`new-source-static-final.json`, and `broken-nats-control.log`.
+The first full runs preceded the final additional regression cases and verifier
+control acknowledgements; the focused and corrected process runs above record
+those follow-ups. Required CI now includes resource admission in integration/full
+mode; this local record does not claim a hosted matrix result.
+
+These are Windows and Linux runs separately. A mixed Windows-controller/Linux-
+worker application deployment, actual GPU cleanup and container-supervisor
+integration were not exercised. Samplegen migration and package publication are
+downstream work. Native-call exclusion is proven with controlled callbacks and
+threads; the library trusts application cleanup and termination attestations.
+
 ## Unified catalog, CLI metadata, and worker lifetime (2026-10-05)
 
 Independent local verification of the implementation for issues

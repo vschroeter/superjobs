@@ -102,7 +102,7 @@ at **`04f24f2`** — six fast cells, four integration cells, both aggregates pas
 Stable minors were checked against [Python 3.14.7](https://www.python.org/downloads/release/python-3147/)
 and the [2026-08 stable release blog post](https://blog.python.org/2026/08/python-3147-31315/).
 
-## `dev_check full` stages (eight)
+## `dev_check full` stages (nine)
 
 1. Deterministic pytest (`uv run python -m pytest -m "not nats and not contract_typing"`)
 2. Contract typing (`uv run python tools/verify_contract_typing.py`)
@@ -112,8 +112,12 @@ and the [2026-08 stable release blog post](https://blog.python.org/2026/08/pytho
 6. Broker persistent-store restart (`uv run python tools/verify_broker_restart.py`)
 7. Idle outage reconnect (`uv run python tools/verify_idle_outage.py`)
 8. Installed contract-interface CLI (`uv run python tools/verify_cli_process.py`)
+9. Installed resource admission (`uv run python tools/verify_resource_admission.py`)
 
-Fast mode runs stage 1 only. Integration workflow jobs use a **15 minute** timeout;
+Fast mode runs stage 1 only; integration mode runs stages 2–9. Resource admission
+uses independent installed workers, forced real redelivery, supervisor-confirmed
+termination and a persistent broker restart. A broken required environment fails
+this stage. Integration workflow jobs use a **15 minute** timeout;
 orchestrator integration budget **855 s** (job cap minus **45 s** upload reserve).
 Recovery scenario caps remain **90 s**; process startup/shutdown **30 s**.
 
