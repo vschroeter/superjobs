@@ -56,6 +56,29 @@ Controller and contract packages import admission types without worker handlers:
   `jobs.register(..., resources=…)`.
 - `jobs.resources` exposes `snapshot()` and `resolve_terminated_incarnation()` on
   runtimes backed by an admission store.
+- `jobs.worker_incarnation` returns the immutable `WorkerIncarnation` used by
+  resource admission for the current serving lifetime. It raises `RuntimeError`
+  before startup and after shutdown; `worker_id` remains stable across restarts,
+  while `incarnation_id` changes for each successful serving lifetime. The
+  returned frozen value is detached from the runtime; a captured earlier value
+  remains the identity of its original lifetime.
+
+A child process can report the value to its trusted supervisor over an
+application-owned channel:
+
+```python
+await jobs.start()
+try:
+    await report_to_parent(jobs.worker_incarnation.model_dump(mode="json"))
+    await jobs.wait_until_stopped()
+finally:
+    await jobs.stop()
+```
+
+`report_to_parent` represents application IPC. The supervisor must still validate
+which process it controls and confirm termination independently; an incarnation
+snapshot, heartbeat timeout, or presence expiry does not prove that work stopped
+or authorize resource takeover.
 
 ### Handler cleanup (fail-closed)
 
