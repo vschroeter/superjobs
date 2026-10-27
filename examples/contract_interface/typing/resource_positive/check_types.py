@@ -113,6 +113,7 @@ def _runtime_decorators_and_register(jobs: SuperJobs) -> None:
 def _runtime_capacity_and_controller_surface() -> None:
     jobs = SuperJobs(resource_capacities=_RESOURCES)
     _ = jobs.resources
+    assert_type(jobs.worker_incarnation, WorkerIncarnation)
     _runtime_decorators_and_register(jobs)
 
 

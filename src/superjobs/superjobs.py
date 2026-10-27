@@ -169,6 +169,21 @@ class SuperJobs:
         return self._worker_id
 
     @property
+    def worker_incarnation(self) -> WorkerIncarnation:
+        """Return the identity for this runtime's current serving lifetime.
+
+        The identity is available only while the runtime is serving. Each
+        successful start receives a new incarnation, while ``worker_id`` stays
+        stable across restarts.
+        """
+        if not self._started or self._serving_generation < 1:
+            raise RuntimeError("SuperJobs runtime is not serving")
+        return WorkerIncarnation(
+            worker_id=self._worker_id,
+            incarnation_id=str(self._serving_generation),
+        )
+
+    @property
     def catalog(self) -> HandlerCatalog:
         return self._catalog
 
@@ -179,10 +194,7 @@ class SuperJobs:
         return self._runtime_resources
 
     def _worker_incarnation(self) -> WorkerIncarnation:
-        return WorkerIncarnation(
-            worker_id=self._worker_id,
-            incarnation_id=str(self._serving_generation),
-        )
+        return self.worker_incarnation
 
     async def _declare_resource_capacities(self) -> None:
         if self._resource_admission is None:

@@ -5,8 +5,10 @@ from dataclasses import dataclass
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from superjobs import InMemoryTransport, Job, JobContext, SuperJobs
+from superjobs.resources import WorkerIncarnation
 from superjobs.jobs.job_handler import JobHandler
 
 
@@ -65,6 +67,38 @@ async def test_serve_starts_waits_and_stops() -> None:
     await jobs.stop()
     await asyncio.wait_for(serve_task, timeout=2)
     assert not jobs.started
+
+
+@pytest.mark.asyncio
+async def test_worker_incarnation_is_available_only_during_serving() -> None:
+    jobs = SuperJobs(transport=InMemoryTransport(), discovery=False)
+    job = Job("tests.lifecycle.incarnation", version="v1", request=None, result=None)
+
+    @jobs.handler(job)
+    async def handler(context: JobContext[None]) -> None:
+        return None
+
+    with pytest.raises(RuntimeError, match="not serving"):
+        _ = jobs.worker_incarnation
+
+    await jobs.start()
+    first = jobs.worker_incarnation
+    assert isinstance(first, WorkerIncarnation)
+    assert first.worker_id == jobs.worker_id
+    with pytest.raises(ValidationError):
+        first.incarnation_id = "changed"
+    await jobs.stop()
+    with pytest.raises(RuntimeError, match="not serving"):
+        _ = jobs.worker_incarnation
+
+    await jobs.start()
+    try:
+        second = jobs.worker_incarnation
+        assert second.worker_id == first.worker_id
+        assert second.incarnation_id != first.incarnation_id
+        assert first.incarnation_id != second.incarnation_id
+    finally:
+        await jobs.stop()
 
 
 @pytest.mark.asyncio

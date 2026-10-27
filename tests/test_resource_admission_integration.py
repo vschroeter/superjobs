@@ -99,6 +99,44 @@ async def test_cross_job_mutual_exclusion_on_shared_resource(
 
 
 @pytest.mark.asyncio
+async def test_public_worker_incarnation_matches_resource_admission() -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    catalog = HandlerCatalog()
+
+    @catalog.handler(job_a, resources={RESOURCE_KEY: 1})
+    async def handle(context: JobContext[None]) -> str:
+        entered.set()
+        await release.wait()
+        acknowledge_resource_cleanup(context)
+        return "done"
+
+    runtime = SuperJobs(
+        transport=InMemoryTransport(),
+        handlers=catalog,
+        resource_capacities={RESOURCE_KEY: 1},
+        discovery=False,
+    )
+    await runtime.start()
+    try:
+        incarnation = runtime.worker_incarnation
+        handle = await runtime.client(job_a).submit()
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        snapshot = await runtime.resources.snapshot()
+        owner = next(
+            record.owner
+            for record in snapshot.resources
+            if record.resource_key == RESOURCE_KEY and record.owner is not None
+        )
+        assert owner.incarnation == incarnation
+        release.set()
+        await _bounded_outcome(handle)
+    finally:
+        release.set()
+        await runtime.stop(graceful=False)
+
+
+@pytest.mark.asyncio
 async def test_cleanup_failure_retains_owner_and_withdraws_readiness(
     shared_transport: InMemoryTransport,
 ) -> None:
