@@ -7,9 +7,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar
 
 from superjobs.discovery.config import PresenceConfig
-from superjobs.discovery.envelope import StoredWorkerRegistration
+from superjobs.discovery.envelope import StoredWorkerRegistration, decode_envelope_bytes
 from superjobs.discovery.errors import DiscoveryError, DiscoveryUnavailableError, DiscoveryWriteError
-from superjobs.discovery.memory import Clock, DiscoveryBackend, utc_now
+from superjobs.discovery.memory import Clock, DiscoveryBackend, registration_key, utc_now
 from superjobs.discovery.models import WorkerRegistrationMetadata, WorkerRegistrationState
 from superjobs.discovery.reader import resolve_discovery_backend
 from superjobs.jobs.job import Job
@@ -20,12 +20,20 @@ from superjobs.presence.capabilities_runtime import (
     prepare_registration_wire,
     validate_capability_value,
 )
-from superjobs.presence.errors import LocalWorkerHandleError, WorkerDiscoveryDisabledError
+from superjobs.discovery.observation import supports_own_registration_observation
+from superjobs.presence.errors import LocalWorkerHandleError, WorkerDiscoveryDisabledError, WorkerPresenceUnavailableError
 from superjobs.presence.local_handle import LocalWorkerHandle
+from superjobs.presence.own_registration_state import is_actively_offered
 from superjobs.runtime_lifecycle import finish_cleanup
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+
+_REGISTRY_UNAVAILABLE_ERRORS = (
+    DiscoveryUnavailableError,
+    ConnectionError,
+    OSError,
+)
 
 
 @dataclass
@@ -38,6 +46,12 @@ class PresenceEntry:
     fence: int = 0
     accepted: StoredWorkerRegistration | None = None
     attempted_generations: set[int] = field(default_factory=set)
+    readiness_withdrawn: asyncio.Event = field(default_factory=asyncio.Event)
+    own_registration_active: bool = False
+    own_registration_inactive: asyncio.Event = field(default_factory=asyncio.Event)
+    own_registration_monitor: asyncio.Task[None] | None = None
+    own_registration_monitor_generation: int = 0
+    own_registration_last_stored: StoredWorkerRegistration | None = None
 
 
 class PresenceSupervisor:
@@ -120,6 +134,278 @@ class PresenceSupervisor:
         if not self.has_handler(job):
             raise LocalWorkerHandleError("No handler is registered in this runtime", job=job)
         return LocalWorkerHandle(self, job)
+
+    def is_readiness_withdrawn(self, job: Job[Any, Any, Any]) -> bool:
+        return job.canonical_name in self._withdrawn_keys
+
+    async def wait_until_readiness_withdrawn(
+        self,
+        job: Job[Any, Any, Any],
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        self.ensure_registry_access()
+        entry = self._entries.get(job.canonical_name)
+        if entry is None:
+            raise LocalWorkerHandleError("No handler is registered in this runtime", job=job)
+        if entry.readiness_withdrawn.is_set():
+            return
+        if timeout is None:
+            await entry.readiness_withdrawn.wait()
+            return
+        await asyncio.wait_for(entry.readiness_withdrawn.wait(), timeout=timeout)
+
+    async def read_own_registration(
+        self,
+        job: Job[Any, Any, Any],
+        *,
+        include_stale: bool = False,
+    ) -> StoredWorkerRegistration | None:
+        self.ensure_registry_access()
+        config = self._config_for_publication()
+        read = getattr(self._require_discovery(), "read_registration", None)
+        if not callable(read):
+            raise WorkerPresenceUnavailableError(
+                "Targeted registration reads are not supported by this discovery backend",
+                job=job,
+            )
+        data = await self._bounded(
+            read(self._worker_id, job.identity),
+            description="Worker registration lookup",
+        )
+        if data is None:
+            return None
+        stored = decode_envelope_bytes(data, max_bytes=config.max_envelope_bytes)
+        expected = registration_key(self._worker_id, job.identity)
+        actual = registration_key(stored.worker_id, stored.job)
+        if actual != expected:
+            from superjobs.discovery.errors import DiscoveryEnvelopeError
+
+            raise DiscoveryEnvelopeError(
+                "Registration key does not match envelope identity",
+                worker_id=stored.worker_id,
+                job=stored.job,
+            )
+        if not include_stale:
+            now = utc_now(self._clock)
+            if stored.state != WorkerRegistrationState.READY:
+                return None
+            if stored.expires_at <= now:
+                return None
+        return stored
+
+    def is_own_registration_active(self, job: Job[Any, Any, Any]) -> bool:
+        entry = self._entries.get(job.canonical_name)
+        if entry is None:
+            raise LocalWorkerHandleError("No handler is registered in this runtime", job=job)
+        return entry.own_registration_active
+
+    def _discovery_supports_own_registration_observation(self) -> bool:
+        if not self._enabled:
+            return False
+        try:
+            discovery = self._require_discovery()
+        except WorkerDiscoveryDisabledError:
+            return False
+        return supports_own_registration_observation(discovery)
+
+    def _ensure_own_registration_observation(self, job: Job[Any, Any, Any]) -> None:
+        if not self._discovery_supports_own_registration_observation():
+            raise WorkerPresenceUnavailableError(
+                "Own registration observation is not supported by this discovery backend",
+                job=job,
+            )
+
+    async def wait_until_own_registration_inactive(
+        self,
+        job: Job[Any, Any, Any],
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        """Wait until the handler's registry row is not actively offered."""
+        self.ensure_registry_access()
+        self._ensure_own_registration_observation(job)
+        entry = self._entries.get(job.canonical_name)
+        if entry is None:
+            raise LocalWorkerHandleError("No handler is registered in this runtime", job=job)
+        if not entry.own_registration_active:
+            return
+        if timeout is None:
+            await entry.own_registration_inactive.wait()
+            return
+        await asyncio.wait_for(entry.own_registration_inactive.wait(), timeout=timeout)
+
+    async def reconcile_own_registration(
+        self,
+        job: Job[Any, Any, Any],
+    ) -> StoredWorkerRegistration | None:
+        entry = self._entries.get(job.canonical_name)
+        if entry is None:
+            raise LocalWorkerHandleError("No handler is registered in this runtime", job=job)
+        try:
+            stored = await self.read_own_registration(job, include_stale=True)
+        except _REGISTRY_UNAVAILABLE_ERRORS:
+            self._mark_own_registration_unavailable(entry)
+            raise
+        self._apply_own_registration_observation(entry, stored)
+        return stored
+
+    def _stored_from_watch_payload(
+        self,
+        job: Job[Any, Any, Any],
+        payload: bytes | None,
+    ) -> StoredWorkerRegistration | None:
+        if payload is None:
+            return None
+        config = self._config_for_publication()
+        stored = decode_envelope_bytes(payload, max_bytes=config.max_envelope_bytes)
+        expected = registration_key(self._worker_id, job.identity)
+        actual = registration_key(stored.worker_id, stored.job)
+        if actual != expected:
+            from superjobs.discovery.errors import DiscoveryEnvelopeError
+
+            raise DiscoveryEnvelopeError(
+                "Registration key does not match envelope identity",
+                worker_id=stored.worker_id,
+                job=stored.job,
+            )
+        return stored
+
+    def _apply_own_registration_observation(
+        self,
+        entry: PresenceEntry,
+        stored: StoredWorkerRegistration | None,
+    ) -> None:
+        now = utc_now(self._clock)
+        active = is_actively_offered(stored, evaluated_at=now)
+        previous = entry.own_registration_active
+        entry.own_registration_active = active
+        entry.own_registration_last_stored = stored
+        if active:
+            entry.own_registration_inactive.clear()
+        elif previous:
+            entry.own_registration_inactive.set()
+
+    def _mark_own_registration_unavailable(self, entry: PresenceEntry) -> None:
+        previous = entry.own_registration_active
+        entry.own_registration_active = False
+        if previous or not entry.own_registration_inactive.is_set():
+            entry.own_registration_inactive.set()
+
+    async def _own_registration_lease_tick(
+        self,
+        entry: PresenceEntry,
+        monitor_generation: int,
+    ) -> None:
+        interval = max(
+            self._resolve_config().renewal_interval.total_seconds() / 2.0,
+            0.05,
+        )
+        while (
+            self._phase == "ready"
+            and entry.own_registration_monitor_generation == monitor_generation
+        ):
+            await asyncio.sleep(interval)
+            self._apply_own_registration_observation(
+                entry,
+                entry.own_registration_last_stored,
+            )
+
+    async def _own_registration_monitor_loop(self, entry: PresenceEntry) -> None:
+        monitor_generation = entry.own_registration_monitor_generation
+        backoff = self._resolve_config().renewal_interval.total_seconds()
+        while (
+            self._phase == "ready"
+            and entry.own_registration_monitor_generation == monitor_generation
+        ):
+            try:
+                await self.reconcile_own_registration(entry.job)
+            except _REGISTRY_UNAVAILABLE_ERRORS:
+                self._mark_own_registration_unavailable(entry)
+                await asyncio.sleep(backoff)
+                continue
+            if (
+                self._phase != "ready"
+                or entry.own_registration_monitor_generation != monitor_generation
+            ):
+                return
+            discovery = self._require_discovery()
+            lease_task = asyncio.create_task(
+                self._own_registration_lease_tick(entry, monitor_generation),
+                name=f"superjobs-own-registration-lease-{entry.job.canonical_name}",
+            )
+            try:
+                watch = discovery.watch_registration(self._worker_id, entry.job.identity)
+                async for payload in watch:
+                    if (
+                        self._phase != "ready"
+                        or entry.own_registration_monitor_generation != monitor_generation
+                    ):
+                        return
+                    try:
+                        stored = self._stored_from_watch_payload(entry.job, payload)
+                    except DiscoveryEnvelopeError:
+                        logger.exception(
+                            "Ignoring malformed own registration watch payload for %s",
+                            entry.job,
+                        )
+                        continue
+                    self._apply_own_registration_observation(entry, stored)
+            except asyncio.CancelledError:
+                raise
+            except _REGISTRY_UNAVAILABLE_ERRORS:
+                self._mark_own_registration_unavailable(entry)
+                await asyncio.sleep(backoff)
+            except Exception:
+                logger.exception(
+                    "Own registration watch failed for worker %s on %s",
+                    self._worker_id,
+                    entry.job,
+                )
+                self._mark_own_registration_unavailable(entry)
+                await asyncio.sleep(backoff)
+            finally:
+                lease_task.cancel()
+                await asyncio.gather(lease_task, return_exceptions=True)
+
+    def _start_own_registration_monitors(self) -> None:
+        if not self._discovery_supports_own_registration_observation():
+            return
+        for entry in self._entries.values():
+            entry.own_registration_monitor_generation += 1
+            generation = entry.own_registration_monitor_generation
+            task = entry.own_registration_monitor
+            if task is not None and not task.done():
+                task.cancel()
+            entry.own_registration_monitor = asyncio.create_task(
+                self._own_registration_monitor_loop(entry),
+                name=f"superjobs-own-registration-{entry.job.canonical_name}",
+            )
+            entry.own_registration_monitor_generation = generation
+
+    async def _stop_own_registration_monitors(self) -> None:
+        tasks: list[asyncio.Task[None]] = []
+        for entry in self._entries.values():
+            entry.own_registration_monitor_generation += 1
+            task = entry.own_registration_monitor
+            entry.own_registration_monitor = None
+            if task is not None:
+                tasks.append(task)
+        for task in tasks:
+            if not task.cancelling():
+                task.cancel()
+        if tasks:
+            await asyncio.wait(tasks, timeout=self._resolve_config().read_timeout.total_seconds())
+            for task in tasks:
+                task.add_done_callback(self._consume_task_result)
+
+    def _signal_readiness_withdrawn(self, entry: PresenceEntry) -> None:
+        entry.readiness_withdrawn.set()
+
+    def _reset_readiness_withdrawn(self, entry: PresenceEntry) -> None:
+        entry.readiness_withdrawn = asyncio.Event()
+        entry.own_registration_active = False
+        entry.own_registration_inactive = asyncio.Event()
 
     @staticmethod
     def _consume_task_result(task: asyncio.Task[Any]) -> None:
@@ -208,6 +494,7 @@ class PresenceSupervisor:
             raise LocalWorkerHandleError("Stale acknowledged presence operation", job=entry.job)
         entry.accepted = registration
         entry.generation = generation
+        self._apply_own_registration_observation(entry, registration)
 
     def _registration(self, entry: PresenceEntry, raw: Any) -> StoredWorkerRegistration:
         now = utc_now(self._clock)
@@ -224,9 +511,14 @@ class PresenceSupervisor:
         """Mark a handler as draining without tearing down in-flight admission."""
         self._withdrawn_keys.add(job.canonical_name)
         if not self._enabled:
+            entry = self._entries.get(job.canonical_name)
+            if entry is not None:
+                self._signal_readiness_withdrawn(entry)
             return
         entry = self._entries.get(job.canonical_name)
         if entry is None or entry.accepted is None:
+            if entry is not None:
+                self._signal_readiness_withdrawn(entry)
             return
 
         async def run() -> None:
@@ -244,8 +536,13 @@ class PresenceSupervisor:
                     generation=entry.generation,
                     fence=entry.fence,
                 )
+            self._signal_readiness_withdrawn(entry)
 
-        await self._operation(run())
+        try:
+            await self._operation(run())
+        except Exception:
+            self._signal_readiness_withdrawn(entry)
+            raise
 
     async def publish_initial(self, job: Job[Any, Any, Any], *, generation: int) -> None:
         if not self._enabled:
@@ -376,10 +673,16 @@ class PresenceSupervisor:
 
     def start_renewal(self) -> None:
         self._phase = "ready"
-        if self._enabled and self._entries and self._renewal_task is None:
-            self._renewal_task = asyncio.create_task(self._renewal_loop(), name="superjobs-presence-renewal")
+        if self._enabled and self._entries:
+            self._start_own_registration_monitors()
+            if self._renewal_task is None:
+                self._renewal_task = asyncio.create_task(
+                    self._renewal_loop(),
+                    name="superjobs-presence-renewal",
+                )
 
     async def stop_renewal(self) -> None:
+        await self._stop_own_registration_monitors()
         task = self._renewal_task
         self._renewal_task = None
         if task is not None:
@@ -448,6 +751,8 @@ class PresenceSupervisor:
 
     async def begin_serving_generation(self) -> int:
         self._withdrawn_keys.clear()
+        for entry in self._entries.values():
+            self._reset_readiness_withdrawn(entry)
         self._serving_generation += 1
         self._phase = "starting"
         return self._serving_generation

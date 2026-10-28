@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import assert_type
 
-from superjobs import HandlerCatalog, JobContext, LocalWorkerHandle, RequestJob, SuperJobs
+from superjobs import HandlerCatalog, JobContext, LocalWorkerHandle, RequestJob, SuperJobs, WorkerRegistration
 from superjobs_contract_example import (
     HEARTBEAT_JOB,
     HeartbeatResult,
@@ -117,6 +117,22 @@ def _legacy_no_cap_none_only() -> None:
         return HeartbeatResult(ok=True)
 
     assert_type(jobs.worker(HEARTBEAT_JOB), LocalWorkerHandle[None])
+
+
+async def _local_worker_state_surface() -> None:
+    handle = jobs.worker(LOCALE_DISCOVERY_JOB)
+    assert_type(handle.readiness_withdrawn, bool)
+    assert_type(handle.own_registration_active, bool)
+    await handle.wait_until_readiness_withdrawn()
+    await handle.wait_until_own_registration_inactive(timeout=1.0)
+    assert_type(
+        await handle.read_own_registration(include_stale=True),
+        WorkerRegistration[LocaleCapability] | None,
+    )
+    assert_type(
+        await handle.reconcile_own_registration(),
+        WorkerRegistration[LocaleCapability] | None,
+    )
 
 
 def _optional_capability_value() -> None:

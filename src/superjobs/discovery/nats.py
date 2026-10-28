@@ -4,6 +4,7 @@ import asyncio
 import base64
 import binascii
 import hashlib
+import inspect
 import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -39,6 +40,7 @@ _KV_SAFE_KEY_RE = re.compile(r"^[-/_=\.a-zA-Z0-9]+$")
 _STREAM_ALREADY_EXISTS_CODE = 10058
 _JS_REQUEST_TIMEOUT_CAP_SECONDS = 1.0
 _KV_CACHE_RETRY_ATTEMPTS = 2
+_KV_DELETE_OPERATIONS = frozenset({"DEL", "PURGE"})
 
 # Budget to let a shielded nats-py KeyValue.watchall initializer finish after caller
 # cancellation so consumer subscriptions can be torn down via watcher.stop().
@@ -192,6 +194,21 @@ def _is_missing_bucket_error(error: BaseException) -> bool:
     return False
 
 
+def _ephemeral_watch_consumer_target(
+    kv: KeyValue,
+    consumer_info: object,
+) -> tuple[str, str] | None:
+    """Return stream and consumer name only for ephemeral consumers owned by this watch."""
+    config = getattr(consumer_info, "config", None)
+    durable_name = getattr(config, "durable_name", None) if config is not None else None
+    if durable_name:
+        return None
+    name = getattr(consumer_info, "name", None)
+    if not name:
+        return None
+    return (kv._stream, name)
+
+
 class NatsDiscoveryBackend:
     """JetStream KV persistence for worker registration snapshots."""
 
@@ -337,17 +354,61 @@ class NatsDiscoveryBackend:
                 ) from last_error
             raise DiscoveryUnavailableError("Discovery registry is unavailable")
 
-    async def _stop_watcher(self, watcher: KeyValue.KeyWatcher, *, strict: bool) -> None:
+    async def _stop_watcher(
+        self,
+        watcher: KeyValue.KeyWatcher,
+        *,
+        strict: bool,
+        kv: KeyValue | None = None,
+        delete_ephemeral_consumer: bool = False,
+    ) -> None:
+        stop_timeout = min(_JS_REQUEST_TIMEOUT_CAP_SECONDS, self._timeout_seconds())
+        cancel_exc: BaseException | None = None
+        deferred: BaseException | None = None
+        deferred_cause: BaseException | None = None
+        consumer_target: tuple[str, str] | None = None
+
+        sub = getattr(watcher, "_sub", None)
+        if delete_ephemeral_consumer and kv is not None and sub is not None:
+            try:
+                consumer_info = sub.consumer_info()
+                if inspect.isawaitable(consumer_info):
+                    cinfo = await asyncio.wait_for(consumer_info, timeout=stop_timeout)
+                    consumer_target = _ephemeral_watch_consumer_target(kv, cinfo)
+            except asyncio.CancelledError as error:
+                cancel_exc = error
+            except Exception as error:  # noqa: BLE001
+                if strict:
+                    deferred = error
+
         try:
-            await asyncio.wait_for(
-                watcher.stop(),
-                timeout=min(_JS_REQUEST_TIMEOUT_CAP_SECONDS, self._timeout_seconds()),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            if strict:
-                raise
+            await asyncio.wait_for(watcher.stop(), timeout=stop_timeout)
+        except asyncio.CancelledError as error:
+            cancel_exc = error
+        except Exception as error:  # noqa: BLE001
+            if strict and deferred is None:
+                deferred = error
+
+        if consumer_target is not None:
+            stream, consumer = consumer_target
+            try:
+                js = await self._jetstream()
+                await js._jsm.delete_consumer(stream, consumer)
+            except asyncio.CancelledError as error:
+                cancel_exc = error
+            except Exception as error:  # noqa: BLE001
+                if strict and deferred is None:
+                    deferred = DiscoveryUnavailableError(
+                        "Failed to delete ephemeral discovery watch consumer",
+                    )
+                    deferred_cause = error
+
+        if cancel_exc is not None:
+            raise cancel_exc
+        if deferred is not None:
+            if deferred_cause is not None:
+                raise deferred from deferred_cause
+            raise deferred
 
     async def _await_init_task_quiet(
         self,
@@ -382,17 +443,29 @@ class NatsDiscoveryBackend:
         init_task: asyncio.Task[KeyValue.KeyWatcher],
         *,
         on_cancel: bool,
+        kv: KeyValue | None = None,
+        delete_ephemeral_consumer: bool = False,
     ) -> None:
         if not init_task.done():
             extra = await self._await_init_task_quiet(init_task)
             if extra is not None and extra is not watcher:
                 try:
-                    await self._stop_watcher(extra, strict=not on_cancel)
+                    await self._stop_watcher(
+                        extra,
+                        strict=not on_cancel,
+                        kv=kv,
+                        delete_ephemeral_consumer=delete_ephemeral_consumer,
+                    )
                 except Exception:
                     if not on_cancel:
                         raise
         try:
-            await self._stop_watcher(watcher, strict=not on_cancel)
+            await self._stop_watcher(
+                watcher,
+                strict=not on_cancel,
+                kv=kv,
+                delete_ephemeral_consumer=delete_ephemeral_consumer,
+            )
         except Exception:
             if not on_cancel:
                 raise
@@ -412,11 +485,50 @@ class NatsDiscoveryBackend:
             async def _cleanup_initializer() -> None:
                 initialized = await self._await_init_task_quiet(init_task)
                 if initialized is not None:
-                    await self._stop_watcher(initialized, strict=False)
+                    await self._stop_watcher(
+                        initialized,
+                        strict=False,
+                        kv=kv,
+                        delete_ephemeral_consumer=True,
+                    )
 
             cleanup = asyncio.create_task(
                 _cleanup_initializer(),
                 name="superjobs-discovery-kv-watchall-cleanup",
+            )
+            try:
+                await finish_cleanup(cleanup)
+            except (asyncio.CancelledError, Exception):
+                pass
+            raise
+        return watcher, init_task
+
+    async def _start_kv_watch(
+        self,
+        kv: KeyValue,
+        key: str,
+        **kwargs: object,
+    ) -> tuple[KeyValue.KeyWatcher, asyncio.Task[KeyValue.KeyWatcher]]:
+        init_task = asyncio.create_task(
+            kv.watch(key, **kwargs),
+            name="superjobs-discovery-kv-watch-init",
+        )
+        try:
+            watcher = await asyncio.shield(init_task)
+        except asyncio.CancelledError:
+            async def _cleanup_initializer() -> None:
+                initialized = await self._await_init_task_quiet(init_task)
+                if initialized is not None:
+                    await self._stop_watcher(
+                        initialized,
+                        strict=False,
+                        kv=kv,
+                        delete_ephemeral_consumer=True,
+                    )
+
+            cleanup = asyncio.create_task(
+                _cleanup_initializer(),
+                name="superjobs-discovery-kv-watch-cleanup",
             )
             try:
                 await finish_cleanup(cleanup)
@@ -439,7 +551,13 @@ class NatsDiscoveryBackend:
                 keys.append(entry.key)
         except asyncio.CancelledError:
             cleanup = asyncio.create_task(
-                self._release_kv_watchall(watcher, init_task, on_cancel=True),
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=True,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
                 name="superjobs-discovery-kv-watchall-cleanup",
             )
             try:
@@ -449,13 +567,25 @@ class NatsDiscoveryBackend:
             raise
         except Exception:
             await finish_cleanup(asyncio.create_task(
-                self._release_kv_watchall(watcher, init_task, on_cancel=False),
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=False,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
                 name="superjobs-discovery-kv-watchall-cleanup",
             ))
             raise
         else:
             await finish_cleanup(asyncio.create_task(
-                self._release_kv_watchall(watcher, init_task, on_cancel=False),
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=False,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
                 name="superjobs-discovery-kv-watchall-cleanup",
             ))
             return keys
@@ -463,26 +593,175 @@ class NatsDiscoveryBackend:
     async def _fetch_kv_entry(self, kv: KeyValue, key: str) -> KeyValue.Entry:
         return await kv.get(key)
 
+    async def _collect_snapshot_entries(
+        self,
+        kv: KeyValue,
+    ) -> list[tuple[tuple[str, str, str | None], bytes]]:
+        watcher, init_task = await self._start_kv_watchall(
+            kv,
+            ignore_deletes=False,
+            meta_only=False,
+        )
+        entries: list[tuple[tuple[str, str, str | None], bytes]] = []
+        try:
+            async for entry in watcher:
+                if entry is None:
+                    break
+                if not entry.key.startswith(f"{_KV_KEY_PREFIX}."):
+                    raise DiscoveryEnvelopeError(
+                        f"Unexpected key in discovery KV bucket: {entry.key!r}",
+                    )
+                if entry.operation in _KV_DELETE_OPERATIONS or entry.value is None:
+                    continue
+                logical_key = parse_registration_kv_key(entry.key)
+                entries.append((logical_key, entry.value))
+        except asyncio.CancelledError:
+            cleanup = asyncio.create_task(
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=True,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
+                name="superjobs-discovery-kv-watchall-cleanup",
+            )
+            try:
+                await finish_cleanup(cleanup)
+            except asyncio.CancelledError:
+                pass
+            raise
+        except Exception:
+            await finish_cleanup(asyncio.create_task(
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=False,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
+                name="superjobs-discovery-kv-watchall-cleanup",
+            ))
+            raise
+        else:
+            await finish_cleanup(asyncio.create_task(
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=False,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
+                name="superjobs-discovery-kv-watchall-cleanup",
+            ))
+            return entries
+
+    async def watch_registration(
+        self,
+        worker_id: str,
+        job: JobIdentity,
+    ):
+        """Yield registration payload bytes, or None when the key is deleted or absent.
+
+        The first JetStream snapshot ends with a None sentinel from nats-py. When that
+        sentinel arrives before any value or delete for the key, the key is treated as
+        absent at watch establishment time. Live updates follow; broker disconnects
+        surface as DiscoveryUnavailableError from subsequent KV operations rather than
+        as a silent None.
+        """
+        kv = await self._ensure_kv()
+        kv_key = registration_kv_key(worker_id, job)
+        watcher, init_task = await self._start_kv_watch(
+            kv,
+            kv_key,
+            ignore_deletes=False,
+            meta_only=False,
+        )
+        saw_initial_observation = False
+        try:
+            async for entry in watcher:
+                if entry is None:
+                    if not saw_initial_observation:
+                        yield None
+                    continue
+                saw_initial_observation = True
+                if entry.operation in _KV_DELETE_OPERATIONS or entry.value is None:
+                    yield None
+                else:
+                    yield entry.value
+        except asyncio.CancelledError:
+            cleanup = asyncio.create_task(
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=True,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
+                name="superjobs-discovery-kv-registration-watch-cleanup",
+            )
+            try:
+                await finish_cleanup(cleanup)
+            except asyncio.CancelledError:
+                pass
+            raise
+        except Exception:
+            await finish_cleanup(asyncio.create_task(
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=False,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
+                name="superjobs-discovery-kv-registration-watch-cleanup",
+            ))
+            raise
+        else:
+            await finish_cleanup(asyncio.create_task(
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=False,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
+                name="superjobs-discovery-kv-registration-watch-cleanup",
+            ))
+
+    async def read_registration(self, worker_id: str, job: JobIdentity) -> bytes | None:
+        async def _read() -> bytes | None:
+            kv = await self._ensure_kv()
+            kv_key = registration_kv_key(worker_id, job)
+            try:
+                entry = await self._fetch_kv_entry(kv, kv_key)
+            except (KeyNotFoundError, KeyDeletedError):
+                return None
+            if entry.value is None:
+                return None
+            return entry.value
+
+        try:
+            return await self._run_bounded(_read(), operation="read registration")
+        except DiscoveryConfigurationError:
+            raise
+        except DiscoveryEnvelopeError:
+            raise
+        except DiscoveryUnavailableError:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise DiscoveryUnavailableError(
+                "Discovery registry read failed",
+            ) from error
+
     async def read_snapshot(self, *, include_stale: bool = False) -> DiscoverySnapshot:
         async def _read() -> DiscoverySnapshot:
             evaluated_at = datetime.now(tz=UTC)
             kv = await self._ensure_kv()
-            key_names = await self._list_kv_keys(kv)
-            entries: list[tuple[tuple[str, str, str | None], bytes]] = []
-            for key_name in key_names:
-                if not key_name.startswith(f"{_KV_KEY_PREFIX}."):
-                    raise DiscoveryEnvelopeError(
-                        f"Unexpected key in discovery KV bucket: {key_name!r}",
-                    )
-                logical_key = parse_registration_kv_key(key_name)
-                try:
-                    entry = await self._fetch_kv_entry(kv, key_name)
-                except (KeyNotFoundError, KeyDeletedError):
-                    continue
-                if entry.value is None:
-                    continue
-                entries.append((logical_key, entry.value))
-            return DiscoverySnapshot(evaluated_at=evaluated_at, entries=tuple(entries))
+            materialized = await self._collect_snapshot_entries(kv)
+            return DiscoverySnapshot(evaluated_at=evaluated_at, entries=tuple(materialized))
 
         try:
             return await self._run_bounded(_read(), operation="read")

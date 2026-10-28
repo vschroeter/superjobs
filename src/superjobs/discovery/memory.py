@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -17,6 +17,8 @@ from superjobs.discovery.models import RawCapabilities, WorkerRegistrationMetada
 from superjobs.job_identity import JobIdentity
 
 RegistrationKey = tuple[str, str, str | None]
+
+_REGISTRATION_WATCH_DELETED = object()
 
 
 def registration_key(worker_id: str, job: JobIdentity) -> RegistrationKey:
@@ -106,6 +108,41 @@ class InMemoryDiscoveryBackend:
         self._clock = clock or utc_now
         self._lock = asyncio.Lock()
         self._live: dict[RegistrationKey, _LiveEntry] = {}
+        self._registration_watchers: dict[RegistrationKey, list[asyncio.Queue[object]]] = {}
+
+    def _notify_registration_watchers(self, key: RegistrationKey, payload: object) -> None:
+        for queue in self._registration_watchers.get(key, ()):
+            queue.put_nowait(payload)
+
+    async def watch_registration(
+        self,
+        worker_id: str,
+        job: JobIdentity,
+    ) -> AsyncIterator[bytes | None]:
+        key = registration_key(worker_id, job)
+        queue: asyncio.Queue[object] = asyncio.Queue()
+        async with self._lock:
+            self._registration_watchers.setdefault(key, []).append(queue)
+            entry = self._live.get(key)
+            initial = None if entry is None else entry.data
+        if initial is not None:
+            yield initial
+        else:
+            yield None
+        try:
+            while True:
+                update = await queue.get()
+                if update is _REGISTRATION_WATCH_DELETED:
+                    yield None
+                else:
+                    yield update
+        finally:
+            async with self._lock:
+                watchers = self._registration_watchers.get(key)
+                if watchers is not None and queue in watchers:
+                    watchers.remove(queue)
+                    if not watchers:
+                        self._registration_watchers.pop(key, None)
 
     @property
     def config(self) -> PresenceConfig:
@@ -127,6 +164,12 @@ class InMemoryDiscoveryBackend:
         async with self._lock:
             evaluated_at = utc_now(self._clock)
             return self._snapshot_at(evaluated_at)
+
+    async def read_registration(self, worker_id: str, job: JobIdentity) -> bytes | None:
+        key = registration_key(worker_id, job)
+        async with self._lock:
+            entry = self._live.get(key)
+            return None if entry is None else entry.data
 
     def _store_validated_bytes(
         self,
@@ -152,6 +195,7 @@ class InMemoryDiscoveryBackend:
         key = registration_key(registration.worker_id, registration.job)
         async with self._lock:
             self._store_validated_bytes(key, encoded, validated)
+            self._notify_registration_watchers(key, encoded)
 
     async def write_registration_bytes(
         self,
@@ -180,6 +224,7 @@ class InMemoryDiscoveryBackend:
         _assert_key_matches_registration(key, registration)
         async with self._lock:
             self._store_validated_bytes(key, data, registration)
+            self._notify_registration_watchers(key, data)
 
     async def replace_registration_bytes(
         self,
@@ -210,11 +255,13 @@ class InMemoryDiscoveryBackend:
             if key not in self._live:
                 raise DiscoveryWriteError("Cannot replace a missing worker registration")
             self._store_validated_bytes(key, data, registration)
+            self._notify_registration_watchers(key, data)
 
     async def delete_registration(self, worker_id: str, job: JobIdentity) -> None:
         key = registration_key(worker_id, job)
         async with self._lock:
             self._live.pop(key, None)
+            self._notify_registration_watchers(key, _REGISTRATION_WATCH_DELETED)
 
     def _purge_retention_locked(self, evaluated_at: datetime) -> None:
         retention = self._config.stale_retention
@@ -225,6 +272,7 @@ class InMemoryDiscoveryBackend:
         ]
         for key in expired:
             del self._live[key]
+            self._notify_registration_watchers(key, _REGISTRATION_WATCH_DELETED)
 
     def build_registration(
         self,

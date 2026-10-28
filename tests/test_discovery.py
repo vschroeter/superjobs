@@ -169,6 +169,14 @@ class _SlowDiscoveryBackend:
             entries=(),
         )
 
+    async def read_registration(self, worker_id: str, job: Any) -> None:
+        return None
+
+    async def watch_registration(self, worker_id: str, job: Any):
+        if False:
+            yield None
+        return
+
 
 class _SlowTransport:
     def __init__(self, backend: _SlowDiscoveryBackend) -> None:
@@ -181,6 +189,14 @@ class _BrokenDiscoveryBackend:
 
     async def read_snapshot(self, *, include_stale: bool = False) -> Any:
         raise PermissionError("registry read denied")
+
+    async def read_registration(self, worker_id: str, job: Any) -> None:
+        raise PermissionError("registry read denied")
+
+    async def watch_registration(self, worker_id: str, job: Any):
+        raise PermissionError("registry watch denied")
+        if False:
+            yield None
 
 
 class _ThirdPartyTransportWithoutDiscovery:

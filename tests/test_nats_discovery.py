@@ -12,7 +12,7 @@ import pytest
 from faststream.nats import NatsBroker
 from nats.js.api import KeyValueConfig, StorageType
 
-from superjobs import Job, JobIdentity, SuperJobs
+from superjobs import Job, JobContext, JobIdentity, SuperJobs
 from superjobs.discovery.capabilities import capability_schema_id, encode_application_capabilities
 from superjobs.discovery.config import DEFAULT_MAX_ENVELOPE_BYTES, PresenceConfig
 from superjobs.discovery.envelope import ENVELOPE_VERSION, encode_envelope
@@ -114,6 +114,38 @@ async def test_fresh_bucket_provisions_and_reads_empty(
         assert await list_offered_jobs(backend) == []
     finally:
         await backend.stop()
+
+
+@pytest.mark.nats
+@pytest.mark.asyncio
+async def test_repeated_read_snapshot_bounded_ephemeral_consumers(
+    nats_url: str,
+    nats_queue_config,
+) -> None:
+    _, backend = await _connect_backend(nats_url, nats_queue_config)
+    discovery = backend.discovery_backend
+    assert isinstance(discovery, NatsDiscoveryBackend)
+    identity = JobIdentity(name=f"tests.nats.snap.{uuid.uuid4().hex}", version="v1")
+    now = datetime.now(tz=UTC)
+    await discovery.write_registration(
+        _build_registration(worker_id="worker-snap", job=identity, at=now),
+        max_envelope_bytes=discovery.config.max_envelope_bytes,
+    )
+    kv = await discovery._ensure_kv()
+    js = await discovery._jetstream()
+    stream = kv._stream
+
+    async def ephemeral_consumer_count() -> int:
+        infos = await js._jsm.consumers_info(stream)
+        return len(infos)
+
+    baseline = await ephemeral_consumer_count()
+    for _ in range(25):
+        snapshot = await discovery.read_snapshot()
+        assert len(snapshot.entries) == 1
+    after = await ephemeral_consumer_count()
+    assert after - baseline <= 2
+    await backend.stop()
 
 
 @pytest.mark.nats
@@ -414,21 +446,19 @@ async def test_delete_between_enumeration_and_get_is_benign(
     _, backend = await _connect_backend(nats_url, nats_queue_config)
     identity = JobIdentity(name="tests.nats.race", version="v1")
     now = datetime.now(tz=UTC)
-    key = registration_kv_key("worker-race", identity)
     try:
         await backend.discovery_backend.write_registration(
             _build_registration(worker_id="worker-race", job=identity, at=now),
             max_envelope_bytes=backend.discovery_backend.config.max_envelope_bytes,
         )
         discovery = backend.discovery_backend
-        original_fetch = discovery._fetch_kv_entry
+        original_collect = discovery._collect_snapshot_entries
 
-        async def fetch_and_delete(kv, key_name: str):
-            if key_name == key:
-                await discovery.delete_registration("worker-race", identity)
-            return await original_fetch(kv, key_name)
+        async def collect_and_delete(kv):
+            await discovery.delete_registration("worker-race", identity)
+            return await original_collect(kv)
 
-        discovery._fetch_kv_entry = fetch_and_delete
+        discovery._collect_snapshot_entries = collect_and_delete
         snapshot = await discovery.read_snapshot()
         assert snapshot.entries == ()
         assert await list_worker_registrations(backend, identity) == []
@@ -1053,6 +1083,114 @@ async def test_short_retention_ttl_eventually_clears_kv_entry(
         assert await list_worker_registrations(backend, identity) == []
     finally:
         await backend.stop()
+
+
+@pytest.mark.nats
+@pytest.mark.asyncio
+async def test_local_worker_read_own_registration_over_nats(
+    nats_url: str,
+    nats_queue_config,
+) -> None:
+    jobs = SuperJobs(
+        broker=NatsBroker(nats_url, connect_timeout=2, max_reconnect_attempts=0),
+        queue_config=nats_queue_config,
+    )
+    job = _capability_job(f"tests.nats.own.{uuid.uuid4().hex}")
+
+    @jobs.handler(job, capabilities=WorkerCapability(locale="de"))
+    async def handler(context: JobContext[None]) -> WorkerCapability:
+        return WorkerCapability(locale="de")
+
+    await jobs.start()
+    try:
+        own = await jobs.worker(job).read_own_registration()
+        assert own is not None
+        assert own.worker_id == jobs.worker_id
+        assert own.capabilities is not None
+        assert own.capabilities.locale == "de"
+    finally:
+        await jobs.stop()
+
+
+@pytest.mark.nats
+@pytest.mark.asyncio
+async def test_watch_registration_on_missing_key_yields_absent(
+    nats_url: str,
+    nats_queue_config,
+) -> None:
+    _, backend = await _connect_backend(nats_url, nats_queue_config)
+    identity = JobIdentity(name="tests.nats.watch.missing", version="v1")
+    try:
+        watch = backend.discovery_backend.watch_registration("worker-missing", identity)
+        first = await asyncio.wait_for(anext(watch), timeout=2)
+        assert first is None
+        await watch.aclose()
+    finally:
+        await backend.stop()
+
+
+@pytest.mark.nats
+@pytest.mark.asyncio
+async def test_watch_registration_after_delete_yields_absent_at_setup(
+    nats_url: str,
+    nats_queue_config,
+) -> None:
+    _, backend = await _connect_backend(nats_url, nats_queue_config)
+    identity = JobIdentity(name="tests.nats.watch.deleted", version="v1")
+    now = datetime.now(tz=UTC)
+    try:
+        await backend.discovery_backend.write_registration(
+            _build_registration(worker_id="worker-del", job=identity, at=now),
+            max_envelope_bytes=backend.discovery_backend.config.max_envelope_bytes,
+        )
+        await backend.discovery_backend.delete_registration("worker-del", identity)
+        watch = backend.discovery_backend.watch_registration("worker-del", identity)
+        first = await asyncio.wait_for(anext(watch), timeout=2)
+        assert first is None
+        await watch.aclose()
+    finally:
+        await backend.stop()
+
+
+@pytest.mark.nats
+@pytest.mark.asyncio
+async def test_own_registration_external_delete_signals_inactive(
+    nats_url: str,
+    nats_queue_config,
+) -> None:
+    jobs = SuperJobs(
+        broker=NatsBroker(nats_url, connect_timeout=2, max_reconnect_attempts=0),
+        queue_config=nats_queue_config,
+    )
+    job = _capability_job(f"tests.nats.delete.{uuid.uuid4().hex}")
+
+    @jobs.handler(job, capabilities=WorkerCapability(locale="de"))
+    async def handler(context: JobContext[None]) -> WorkerCapability:
+        return WorkerCapability(locale="de")
+
+    await jobs.start()
+    backend = jobs.transport
+    assert isinstance(backend, NatsJobBackend)
+    snapshot_reads = 0
+    original = backend.discovery_backend.read_snapshot
+
+    async def counting_snapshot(**kwargs):
+        nonlocal snapshot_reads
+        snapshot_reads += 1
+        return await original(**kwargs)
+
+    backend.discovery_backend.read_snapshot = counting_snapshot  # type: ignore[method-assign]
+    try:
+        handle = jobs.worker(job)
+        assert handle.own_registration_active
+        wait_task = asyncio.create_task(handle.wait_until_own_registration_inactive())
+        await asyncio.sleep(0.1)
+        await backend.discovery_backend.delete_registration(jobs.worker_id, job.identity)
+        await asyncio.wait_for(wait_task, timeout=3)
+        assert not handle.own_registration_active
+        assert snapshot_reads == 0
+    finally:
+        await jobs.stop()
 
 
 def _write_verification_report(path: Path, *, command: str, results: str) -> None:
