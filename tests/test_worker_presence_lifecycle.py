@@ -11,7 +11,10 @@ from superjobs import Job, JobContext, SuperJobs
 from superjobs.discovery.config import PresenceConfig
 from superjobs.discovery.memory import InMemoryDiscoveryBackend
 from superjobs.payload import PayloadValidationError
-from superjobs.presence.errors import WorkerDiscoveryDisabledError
+from superjobs.presence.errors import (
+    WorkerDiscoveryDisabledError,
+    WorkerPresenceUnavailableError,
+)
 from superjobs.transport.in_memory import InMemoryTransport
 
 
@@ -514,7 +517,9 @@ class _MinimalDiscoveryBackend:
             entries=tuple(self._data.items()),
         )
 
-    async def write_registration(self, registration, *, max_envelope_bytes: int) -> None:
+    async def write_registration(
+        self, registration, *, max_envelope_bytes: int
+    ) -> None:
         from superjobs.discovery.envelope import encode_envelope
         from superjobs.discovery.memory import registration_key
 
@@ -546,6 +551,75 @@ async def test_custom_discovery_backend_three_method_protocol() -> None:
 
 
 @pytest.mark.asyncio
+async def test_legacy_three_method_backend_without_own_registration_observation() -> (
+    None
+):
+    clock = MutableClock(datetime(2026, 2, 12, tzinfo=UTC))
+    backend = _MinimalDiscoveryBackend(clock)
+    transport = InMemoryTransport(discovery_store=backend, discovery_clock=clock)
+    jobs = SuperJobs(transport=transport, presence_clock=clock)
+    snapshot_reads = 0
+    original = backend.read_snapshot
+
+    async def counting_snapshot(**kwargs):
+        nonlocal snapshot_reads
+        snapshot_reads += 1
+        return await original(**kwargs)
+
+    backend.read_snapshot = counting_snapshot  # type: ignore[method-assign]
+
+    @jobs.handler(CAP_JOB, capabilities=WorkerCapability(locale="legacy"))
+    async def handler(request: Request, context: JobContext[None]) -> Result:
+        return Result(value="ok")
+
+    await jobs.start()
+    try:
+        entry = jobs._presence._entries[CAP_JOB.canonical_name]
+        assert entry.own_registration_monitor is None
+        await asyncio.sleep(0.2)
+        assert entry.own_registration_monitor is None
+        assert len(await jobs.client(CAP_JOB).workers()) == 1
+        assert snapshot_reads == 1
+        handle = jobs.worker(CAP_JOB)
+        with pytest.raises(WorkerPresenceUnavailableError):
+            await handle.wait_until_own_registration_inactive(timeout=0.05)
+    finally:
+        await jobs.stop()
+
+
+class _WatchOnlyDiscoveryBackend(_MinimalDiscoveryBackend):
+    async def watch_registration(self, worker_id: str, job):
+        if False:
+            yield b""
+
+
+@pytest.mark.asyncio
+async def test_partial_discovery_watch_without_read_skips_own_registration_monitor() -> (
+    None
+):
+    clock = MutableClock(datetime(2026, 2, 13, tzinfo=UTC))
+    backend = _WatchOnlyDiscoveryBackend(clock)
+    transport = InMemoryTransport(discovery_store=backend, discovery_clock=clock)
+    jobs = SuperJobs(transport=transport, presence_clock=clock)
+
+    @jobs.handler(CAP_JOB, capabilities=WorkerCapability(locale="partial"))
+    async def handler(request: Request, context: JobContext[None]) -> Result:
+        return Result(value="ok")
+
+    await jobs.start()
+    try:
+        entry = jobs._presence._entries[CAP_JOB.canonical_name]
+        assert entry.own_registration_monitor is None
+        await asyncio.sleep(0.2)
+        assert entry.own_registration_monitor is None
+        handle = jobs.worker(CAP_JOB)
+        with pytest.raises(WorkerPresenceUnavailableError):
+            await handle.wait_until_own_registration_inactive(timeout=0.05)
+    finally:
+        await jobs.stop()
+
+
+@pytest.mark.asyncio
 async def test_disabled_discovery_does_not_touch_registry() -> None:
     clock = MutableClock(datetime(2026, 2, 11, tzinfo=UTC))
     store = InMemoryDiscoveryBackend(clock=clock)
@@ -555,7 +629,9 @@ async def test_disabled_discovery_does_not_touch_registry() -> None:
         discovery_clock=clock,
     )
     shared = SuperJobs(transport=shared_transport, presence_clock=clock)
-    disabled = SuperJobs(transport=disabled_transport, discovery=False, presence_clock=clock)
+    disabled = SuperJobs(
+        transport=disabled_transport, discovery=False, presence_clock=clock
+    )
 
     @shared.handler(CAP_JOB, capabilities=WorkerCapability(locale="shared"))
     async def handler(request: Request, context: JobContext[None]) -> Result:

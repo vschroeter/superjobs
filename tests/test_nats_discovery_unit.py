@@ -6,12 +6,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nats.js.api import KeyValueConfig, StorageType
-from nats.js.kv import KeyValue
 
 from datetime import UTC, datetime
 
 from superjobs.discovery.config import PresenceConfig
-from superjobs.discovery.errors import DiscoveryEnvelopeError, DiscoveryUnavailableError, DiscoveryWriteError
+from superjobs.discovery.errors import (
+    DiscoveryEnvelopeError,
+    DiscoveryUnavailableError,
+    DiscoveryWriteError,
+)
 from superjobs.discovery.memory import InMemoryDiscoveryBackend, registration_key
 from superjobs.discovery.models import WorkerRegistrationState
 from superjobs.discovery.nats import (
@@ -117,7 +120,10 @@ async def test_list_kv_keys_cancels_during_watchall_init_without_leaking_task() 
         await task
     watcher.stop.assert_awaited()
     await asyncio.sleep(0)
-    assert all(t.get_name() != "superjobs-discovery-kv-watchall-init" for t in asyncio.all_tasks())
+    assert all(
+        t.get_name() != "superjobs-discovery-kv-watchall-init"
+        for t in asyncio.all_tasks()
+    )
 
 
 @pytest.mark.asyncio
@@ -141,7 +147,10 @@ async def test_cancelled_initializer_failure_preserves_cancelled_error() -> None
     with pytest.raises(asyncio.CancelledError):
         await task
     await asyncio.sleep(0)
-    assert all(t.get_name() != "superjobs-discovery-kv-watchall-init" for t in asyncio.all_tasks())
+    assert all(
+        t.get_name() != "superjobs-discovery-kv-watchall-init"
+        for t in asyncio.all_tasks()
+    )
 
 
 @pytest.mark.asyncio
@@ -179,7 +188,9 @@ async def test_cancelled_iteration_stop_failure_preserves_cancelled_error() -> N
     backend = NatsDiscoveryBackend.__new__(NatsDiscoveryBackend)
     backend._config = PresenceConfig(read_timeout=timedelta(seconds=2))
     watcher = MagicMock()
-    watcher.stop = AsyncMock(side_effect=RuntimeError("stop failed during cancel cleanup"))
+    watcher.stop = AsyncMock(
+        side_effect=RuntimeError("stop failed during cancel cleanup")
+    )
 
     async def watchall(**_kwargs):
         return watcher
@@ -208,7 +219,9 @@ async def test_successful_read_stop_failure_is_visible() -> None:
     backend = NatsDiscoveryBackend.__new__(NatsDiscoveryBackend)
     backend._config = PresenceConfig(read_timeout=timedelta(seconds=2))
     watcher = MagicMock()
-    watcher.stop = AsyncMock(side_effect=RuntimeError("stop failed after successful read"))
+    watcher.stop = AsyncMock(
+        side_effect=RuntimeError("stop failed after successful read")
+    )
 
     async def watchall(**_kwargs):
         return watcher
@@ -226,6 +239,98 @@ async def test_successful_read_stop_failure_is_visible() -> None:
     kv.watchall = watchall
     with pytest.raises(RuntimeError, match="stop failed after successful read"):
         await backend._list_kv_keys(kv)
+
+
+@pytest.mark.asyncio
+async def test_bounded_snapshot_includes_external_write_before_read() -> None:
+    backend = NatsDiscoveryBackend.__new__(NatsDiscoveryBackend)
+    backend._config = PresenceConfig(read_timeout=timedelta(seconds=2))
+    collected: list[tuple[tuple[str, str, str | None], bytes]] = []
+
+    class _Entry:
+        def __init__(
+            self, key: str, value: bytes, operation: str | None = None
+        ) -> None:
+            self.key = key
+            self.value = value
+            self.operation = operation
+
+    class _Watcher:
+        def __init__(self, entries: list[_Entry]) -> None:
+            self._entries = entries
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self._entries:
+                raise StopAsyncIteration
+            if len(self._entries) == 1 and self._entries[0] is None:
+                raise StopAsyncIteration
+            item = self._entries.pop(0)
+            if item is None:
+                raise StopAsyncIteration
+            return item
+
+        async def stop(self):
+            return None
+
+    job = JobIdentity(name="tests.external.write", version="v1")
+    key = registration_kv_key("worker-ext", job)
+    payload = b"payload"
+
+    async def watchall(**_kwargs):
+        watcher = _Watcher(
+            [
+                _Entry(key, payload),
+                None,
+            ],
+        )
+        return watcher
+
+    kv = MagicMock()
+    kv.watchall = watchall
+    backend._ensure_kv = AsyncMock(return_value=kv)
+    backend._mutation_lock = asyncio.Lock()
+    backend._kv_init_lock = asyncio.Lock()
+    backend._bucket_name = "test-bucket"
+    backend._discovery_provision = True
+
+    entries = await backend._collect_snapshot_entries(kv)
+    assert len(entries) == 1
+    assert entries[0][0][0] == "worker-ext"
+
+
+@pytest.mark.asyncio
+async def test_watch_registration_empty_initial_snapshot_signals_absent() -> None:
+    backend = NatsDiscoveryBackend.__new__(NatsDiscoveryBackend)
+    backend._config = PresenceConfig(read_timeout=timedelta(seconds=2))
+    job = JobIdentity(name="tests.watch.absent", version="v1")
+
+    class _Watcher:
+        def __init__(self) -> None:
+            self._sent = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self._sent:
+                raise StopAsyncIteration
+            self._sent = True
+            return None
+
+        async def stop(self):
+            return None
+
+    async def start_watch(_kv, _key, **_kwargs):
+        return _Watcher(), asyncio.create_task(asyncio.sleep(0))
+
+    backend._start_kv_watch = start_watch  # type: ignore[method-assign]
+    backend._ensure_kv = AsyncMock(return_value=MagicMock())
+
+    payloads = [item async for item in backend.watch_registration("worker-a", job)]
+    assert payloads == [None]
 
 
 @pytest.mark.asyncio
@@ -277,26 +382,37 @@ async def test_fetch_kv_entry_times_out_on_hanging_get() -> None:
     backend._config = PresenceConfig(read_timeout=timedelta(seconds=0.2))
     kv = MagicMock()
 
-    async def hanging_get(*_args, **_kwargs):
+    async def hanging_watchall(**_kwargs):
         await asyncio.sleep(5)
+        watcher = MagicMock()
+        watcher.__aiter__ = lambda self: self
 
-    kv.get = hanging_get
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+        return watcher
+
+    kv.watchall = hanging_watchall
     backend._kv = kv
 
     async def validate_cached(_kv):
         return None
 
     backend._validate_cached_kv = validate_cached
-    key = registration_kv_key("worker-1", JobIdentity(name="tests.nats.timeout", version="v1"))
-    backend._list_kv_keys = AsyncMock(return_value=[key])
     backend._ensure_kv = AsyncMock(return_value=kv)
     backend._mutation_lock = asyncio.Lock()
     backend._kv_init_lock = asyncio.Lock()
     backend._bucket_name = "test-bucket"
     backend._discovery_provision = True
+    backend._cache_lock = asyncio.Lock()
+    backend._cache_values = {}
+    backend._cache_ready = asyncio.Event()
+    backend._cache_watch_task = None
+    backend._cache_kv = None
 
     with pytest.raises(DiscoveryUnavailableError, match="timed out"):
         await backend.read_snapshot()
+
 
 @pytest.mark.asyncio
 async def test_failed_snapshot_iteration_stops_watcher() -> None:
@@ -315,6 +431,7 @@ async def test_failed_snapshot_iteration_stops_watcher() -> None:
     with pytest.raises(RuntimeError, match="snapshot iteration failed"):
         await backend._list_kv_keys(kv)
     watcher.stop.assert_awaited_once()
+
 
 @pytest.mark.asyncio
 async def test_repeated_cancellation_finishes_watchall_initializer_cleanup() -> None:
@@ -387,3 +504,107 @@ async def test_repeated_cancellation_finishes_watcher_stop() -> None:
         pending.get_name().startswith("superjobs-discovery-kv-watchall-")
         for pending in asyncio.all_tasks()
     )
+
+
+def _bare_nats_discovery_backend() -> NatsDiscoveryBackend:
+    backend = NatsDiscoveryBackend.__new__(NatsDiscoveryBackend)
+    backend._config = PresenceConfig(read_timeout=timedelta(seconds=1))
+    return backend
+
+
+@pytest.mark.asyncio
+async def test_stop_watcher_consumer_info_failure_still_stops_watcher() -> None:
+    backend = _bare_nats_discovery_backend()
+    watcher = MagicMock()
+    watcher.stop = AsyncMock()
+    sub = MagicMock()
+    sub.consumer_info = MagicMock(side_effect=RuntimeError("consumer info failed"))
+    watcher._sub = sub
+    kv = MagicMock()
+    kv._stream = "KV_test"
+    with pytest.raises(RuntimeError, match="consumer info failed"):
+        await backend._stop_watcher(
+            watcher,
+            strict=True,
+            kv=kv,
+            delete_ephemeral_consumer=True,
+        )
+    watcher.stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stop_watcher_cancellation_still_stops_watcher() -> None:
+    backend = _bare_nats_discovery_backend()
+    stop_started = asyncio.Event()
+    watcher = MagicMock()
+
+    async def stop() -> None:
+        stop_started.set()
+
+    watcher.stop = AsyncMock(side_effect=stop)
+    sub = MagicMock()
+    sub.consumer_info = AsyncMock(side_effect=asyncio.CancelledError())
+    watcher._sub = sub
+    kv = MagicMock()
+    kv._stream = "KV_test"
+    with pytest.raises(asyncio.CancelledError):
+        await backend._stop_watcher(
+            watcher,
+            strict=True,
+            kv=kv,
+            delete_ephemeral_consumer=True,
+        )
+    await stop_started.wait()
+    watcher.stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stop_watcher_deletes_ephemeral_consumer_after_stop() -> None:
+    backend = _bare_nats_discovery_backend()
+    watcher = MagicMock()
+    watcher.stop = AsyncMock()
+    cinfo = MagicMock()
+    cinfo.name = "KV_OBS_xyz"
+    cinfo.config.durable_name = None
+    sub = MagicMock()
+    sub.consumer_info = AsyncMock(return_value=cinfo)
+    watcher._sub = sub
+    kv = MagicMock()
+    kv._stream = "KV_test"
+    jsm = MagicMock()
+    jsm.delete_consumer = AsyncMock()
+    js = MagicMock()
+    js._jsm = jsm
+    backend._jetstream = AsyncMock(return_value=js)
+    await backend._stop_watcher(
+        watcher,
+        strict=True,
+        kv=kv,
+        delete_ephemeral_consumer=True,
+    )
+    watcher.stop.assert_awaited_once()
+    jsm.delete_consumer.assert_awaited_once_with("KV_test", "KV_OBS_xyz")
+
+
+@pytest.mark.asyncio
+async def test_stop_watcher_does_not_delete_durable_consumer() -> None:
+    backend = _bare_nats_discovery_backend()
+    watcher = MagicMock()
+    watcher.stop = AsyncMock()
+    cinfo = MagicMock()
+    cinfo.name = "sj-probe-test"
+    cinfo.config.durable_name = "sj-probe-test"
+    sub = MagicMock()
+    sub.consumer_info = AsyncMock(return_value=cinfo)
+    watcher._sub = sub
+    kv = MagicMock()
+    kv._stream = "KV_test"
+    backend._jetstream = AsyncMock()
+    await backend._stop_watcher(
+        watcher,
+        strict=True,
+        kv=kv,
+        delete_ephemeral_consumer=True,
+    )
+    watcher.stop.assert_awaited_once()
+    backend._jetstream.assert_not_awaited()

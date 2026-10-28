@@ -11,6 +11,7 @@ from nats.js.errors import (
     BucketNotFoundError,
     KeyNotFoundError,
     KeyWrongLastSequenceError,
+    NoKeysError,
 )
 from nats.js.kv import KeyValue
 
@@ -54,6 +55,8 @@ from superjobs.resources.wire import (
 _STREAM_ALREADY_EXISTS_CODE = 10058
 _KV_CACHE_RETRY_ATTEMPTS = 2
 _CAS_RETRY_ATTEMPTS = 8
+_KV_KEYS_LIST_RETRY_ATTEMPTS = 3
+_KV_KEYS_LIST_RETRY_DELAY_S = 0.05
 
 
 def _raise_store_unavailable(operation: str, error: BaseException) -> None:
@@ -236,14 +239,38 @@ class NatsResourceAdmissionStore:
         revision: int = entry.revision if entry.revision is not None else 0
         return entry.value, revision
 
-    async def read_snapshot(self, *, evaluated_at: datetime) -> AdmissionSnapshot:
-        kv = await self._ensure_kv()
+    async def _admission_kv_bucket_verified_empty(self, kv: KeyValue) -> bool:
         try:
-            keys = await kv.keys()
+            status = await kv.status()
         except (APIError, nats.errors.Error) as error:
             raise ResourceStoreUnavailableError(
-                "Unable to list admission KV keys"
+                "Unable to read admission KV bucket state",
             ) from error
+        return status.values == 0
+
+    async def _list_admission_kv_keys(self, kv: KeyValue) -> tuple[str, ...]:
+        for attempt in range(_KV_KEYS_LIST_RETRY_ATTEMPTS):
+            try:
+                keys = await kv.keys()
+                return tuple(keys)
+            except NoKeysError as error:
+                if await self._admission_kv_bucket_verified_empty(kv):
+                    return ()
+                if attempt + 1 >= _KV_KEYS_LIST_RETRY_ATTEMPTS:
+                    raise ResourceStoreUnavailableError(
+                        "Admission KV key listing reported no keys while the bucket "
+                        "retains JetStream messages",
+                    ) from error
+                await asyncio.sleep(_KV_KEYS_LIST_RETRY_DELAY_S)
+            except (APIError, nats.errors.Error) as error:
+                raise ResourceStoreUnavailableError(
+                    "Unable to list admission KV keys",
+                ) from error
+        raise ResourceStoreUnavailableError("Unable to list admission KV keys")
+
+    async def read_snapshot(self, *, evaluated_at: datetime) -> AdmissionSnapshot:
+        kv = await self._ensure_kv()
+        keys = await self._list_admission_kv_keys(kv)
         capacities: list[StoredCapacityRecord] = []
         resources: list[StoredResourceRecord] = []
         claims: list[StoredExecutionClaim] = []

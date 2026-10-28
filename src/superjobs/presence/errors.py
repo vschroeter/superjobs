@@ -16,6 +16,16 @@ class WorkerDiscoveryDisabledError(WorkerPresenceError):
 class WorkerPresenceUnavailableError(WorkerPresenceError):
     """Raised when presence operations require discovery that is not configured."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        job: Any | None = None,
+    ) -> None:
+        self.job = job
+        suffix = f" for {job}" if job is not None else ""
+        super().__init__(f"{message}{suffix}")
+
 
 class LocalWorkerHandleError(WorkerPresenceError):
     def __init__(

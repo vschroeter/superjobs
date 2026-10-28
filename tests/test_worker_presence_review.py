@@ -54,6 +54,12 @@ class Registry:
     async def read_snapshot(self, *, include_stale=False):
         return await self.store.read_snapshot(include_stale=include_stale)
 
+    async def read_registration(self, worker_id: str, job):
+        return await self.store.read_registration(worker_id, job)
+
+    def watch_registration(self, worker_id: str, job):
+        return self.store.watch_registration(worker_id, job)
+
     async def write_registration(self, registration, *, max_envelope_bytes):
         self.attempts.put_nowait(registration)
         if self.fail:
