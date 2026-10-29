@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import time
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncIterator
@@ -21,6 +22,7 @@ from nats.js.errors import (
 )
 
 from superjobs.discovery.config import PresenceConfig
+from superjobs.discovery.errors import DiscoveryUnavailableError
 from superjobs.discovery.nats import NatsDiscoveryBackend
 from superjobs.exceptions.jobs import (
     IdempotencyConflictError,
@@ -40,9 +42,14 @@ from superjobs.jobs.events import (
 from superjobs.jobs.execution import JobError, JobState, JobStatus, ProgressSnapshot
 from superjobs.jobs.job_identity import JobIdentity
 from superjobs.jobs.retention import ObservationRetention, ResultRetention
-from superjobs.resources.errors import ResourceStaleOperationError
+from superjobs.resources.errors import (
+    ResourceStaleOperationError,
+    ResourceStoreUnavailableError,
+    WaitingExecutionUnavailableError,
+)
 from superjobs.resources.models import AdmissionOwner
-from superjobs.resources.nats import NatsResourceAdmissionStore
+from superjobs.resources.nats import NatsResourceAdmissionStore, kv_bucket_verified_empty
+from superjobs.resources.waiting_execution import build_waiting_execution_view
 from superjobs.runtime_resources import resource_admission_for_backend
 from superjobs.transport.admission_record import (
     admission_owner_from_wire,
@@ -364,6 +371,94 @@ class NatsJobBackend(JobBackend):
             record = _record_from_wire(_unpack(entry.value))
             if record.deadline is not None and self._deadline_may_enforce(record):
                 self._schedule_deadline(record)
+
+    async def read_waiting_execution_view(
+        self,
+        *,
+        evaluated_at: datetime,
+        max_entries: int,
+        max_scan_keys: int,
+        scan_deadline_monotonic: float,
+    ):
+        if not self.started:
+            raise WaitingExecutionUnavailableError(
+                "Waiting-execution observation requires a started transport",
+            )
+        completion_kv = self._completion_kv
+        if completion_kv is None:
+            raise WaitingExecutionUnavailableError(
+                "Completion store is not available for waiting-execution observation",
+            )
+        try:
+            verified_empty = await kv_bucket_verified_empty(completion_kv)
+        except ResourceStoreUnavailableError as error:
+            raise WaitingExecutionUnavailableError(str(error)) from error
+
+        if verified_empty:
+            return build_waiting_execution_view(
+                evaluated_at=evaluated_at,
+                records=[],
+                max_entries=max_entries,
+                partial=False,
+                scan_truncated=False,
+            )
+
+        try:
+            scanned_keys, scan_truncated = await self.discovery_backend.bounded_kv_meta_key_scan(
+                completion_kv,
+                max_keys=max_scan_keys,
+                deadline_monotonic=scan_deadline_monotonic,
+            )
+        except DiscoveryUnavailableError as error:
+            raise WaitingExecutionUnavailableError(str(error)) from error
+        except APIError as error:
+            raise WaitingExecutionUnavailableError(
+                "Unable to list completion records for waiting-execution observation",
+            ) from error
+
+        if not scanned_keys and not scan_truncated:
+            try:
+                if not await kv_bucket_verified_empty(completion_kv):
+                    raise WaitingExecutionUnavailableError(
+                        "Completion key scan was empty while the bucket retains records",
+                    )
+            except ResourceStoreUnavailableError as error:
+                raise WaitingExecutionUnavailableError(str(error)) from error
+
+        waiting_records: list[ExecutionRecord] = []
+        partial = False
+        for key in sorted(scanned_keys):
+            if time.monotonic() >= scan_deadline_monotonic:
+                scan_truncated = True
+                break
+            try:
+                entry = await completion_kv.get(key)
+            except NotFoundError:
+                partial = True
+                continue
+            except APIError as error:
+                raise WaitingExecutionUnavailableError(
+                    "Unable to read completion records for waiting-execution observation",
+                ) from error
+            if entry.value is None:
+                partial = True
+                continue
+            try:
+                record = _record_from_wire(_unpack(entry.value))
+            except Exception:
+                partial = True
+                continue
+            if record.state is not JobState.WAITING_FOR_RESOURCE:
+                continue
+            waiting_records.append(record)
+
+        return build_waiting_execution_view(
+            evaluated_at=evaluated_at,
+            records=waiting_records,
+            max_entries=max_entries,
+            partial=partial,
+            scan_truncated=scan_truncated,
+        )
 
     async def stop(self) -> None:
         if not self.started:

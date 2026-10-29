@@ -35,3 +35,15 @@ class ResourcePartialAcquisitionError(ResourceAdmissionError):
     def __init__(self, message: str, *, owner: object | None = None) -> None:
         super().__init__(message)
         self.owner = owner
+
+
+class WaitingExecutionObservationError(ResourceAdmissionError):
+    """Read-only waiting-execution observation failed or is unsupported."""
+
+
+class UnsupportedWaitingExecutionBackendError(WaitingExecutionObservationError):
+    """The transport does not expose broker-wide waiting-execution reads."""
+
+
+class WaitingExecutionUnavailableError(WaitingExecutionObservationError):
+    """Waiting-execution observation could not complete a durable read safely."""

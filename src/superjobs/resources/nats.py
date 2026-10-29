@@ -55,8 +55,53 @@ from superjobs.resources.wire import (
 _STREAM_ALREADY_EXISTS_CODE = 10058
 _KV_CACHE_RETRY_ATTEMPTS = 2
 _CAS_RETRY_ATTEMPTS = 8
-_KV_KEYS_LIST_RETRY_ATTEMPTS = 3
-_KV_KEYS_LIST_RETRY_DELAY_S = 0.05
+KV_KEYS_LIST_RETRY_ATTEMPTS = 3
+KV_KEYS_LIST_RETRY_DELAY_S = 0.05
+_KV_KEYS_LIST_RETRY_ATTEMPTS = KV_KEYS_LIST_RETRY_ATTEMPTS
+_KV_KEYS_LIST_RETRY_DELAY_S = KV_KEYS_LIST_RETRY_DELAY_S
+
+
+async def kv_bucket_verified_empty(kv: KeyValue) -> bool:
+    try:
+        status = await kv.status()
+    except (APIError, nats.errors.Error) as error:
+        raise ResourceStoreUnavailableError(
+            "Unable to read JetStream KV bucket state",
+        ) from error
+    return status.values == 0
+
+
+async def list_kv_keys_with_verified_empty(
+    kv: KeyValue,
+    *,
+    ambiguous_empty_message: str,
+    list_failure_message: str = "Unable to list JetStream KV keys",
+    status_failure_message: str = "Unable to read JetStream KV bucket state",
+) -> tuple[str, ...]:
+    """List KV keys, treating ``NoKeysError`` as empty only when the bucket is verified empty.
+
+    ``kv.keys()`` returns the full key set; callers apply scan limits afterward.
+    This is not a constant-memory iterator over bucket contents.
+    """
+    for attempt in range(_KV_KEYS_LIST_RETRY_ATTEMPTS):
+        try:
+            keys = await kv.keys()
+            return tuple(keys)
+        except NoKeysError as error:
+            try:
+                verified_empty = await kv_bucket_verified_empty(kv)
+            except ResourceStoreUnavailableError as status_error:
+                raise ResourceStoreUnavailableError(
+                    status_failure_message,
+                ) from status_error
+            if verified_empty:
+                return ()
+            if attempt + 1 >= _KV_KEYS_LIST_RETRY_ATTEMPTS:
+                raise ResourceStoreUnavailableError(ambiguous_empty_message) from error
+            await asyncio.sleep(_KV_KEYS_LIST_RETRY_DELAY_S)
+        except (APIError, nats.errors.Error) as error:
+            raise ResourceStoreUnavailableError(list_failure_message) from error
+    raise ResourceStoreUnavailableError(list_failure_message)
 
 
 def _raise_store_unavailable(operation: str, error: BaseException) -> None:
@@ -239,34 +284,16 @@ class NatsResourceAdmissionStore:
         revision: int = entry.revision if entry.revision is not None else 0
         return entry.value, revision
 
-    async def _admission_kv_bucket_verified_empty(self, kv: KeyValue) -> bool:
-        try:
-            status = await kv.status()
-        except (APIError, nats.errors.Error) as error:
-            raise ResourceStoreUnavailableError(
-                "Unable to read admission KV bucket state",
-            ) from error
-        return status.values == 0
-
     async def _list_admission_kv_keys(self, kv: KeyValue) -> tuple[str, ...]:
-        for attempt in range(_KV_KEYS_LIST_RETRY_ATTEMPTS):
-            try:
-                keys = await kv.keys()
-                return tuple(keys)
-            except NoKeysError as error:
-                if await self._admission_kv_bucket_verified_empty(kv):
-                    return ()
-                if attempt + 1 >= _KV_KEYS_LIST_RETRY_ATTEMPTS:
-                    raise ResourceStoreUnavailableError(
-                        "Admission KV key listing reported no keys while the bucket "
-                        "retains JetStream messages",
-                    ) from error
-                await asyncio.sleep(_KV_KEYS_LIST_RETRY_DELAY_S)
-            except (APIError, nats.errors.Error) as error:
-                raise ResourceStoreUnavailableError(
-                    "Unable to list admission KV keys",
-                ) from error
-        raise ResourceStoreUnavailableError("Unable to list admission KV keys")
+        return await list_kv_keys_with_verified_empty(
+            kv,
+            ambiguous_empty_message=(
+                "Admission KV key listing reported no keys while the bucket "
+                "retains JetStream messages"
+            ),
+            list_failure_message="Unable to list admission KV keys",
+            status_failure_message="Unable to read admission KV bucket state",
+        )
 
     async def read_snapshot(self, *, evaluated_at: datetime) -> AdmissionSnapshot:
         kv = await self._ensure_kv()

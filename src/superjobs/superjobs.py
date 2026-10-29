@@ -154,7 +154,9 @@ class SuperJobs:
         self._resource_admission = admission
         self._resource_coordinator = ResourceRuntimeCoordinator(self)
         self._runtime_resources = (
-            RuntimeResources(admission) if admission is not None else None
+            RuntimeResources(admission, backend=self.transport)
+            if admission is not None
+            else None
         )
         self.discovery = JobsDiscovery(self)
         if handlers is not None:
