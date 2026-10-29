@@ -14,7 +14,23 @@ capacity, owner/claim/fence, unavailable, revocation, recovery, snapshot and cac
 invalidation all use the same bucket. Work streams, completion/idempotency and
 observation/discovery remain queue-specific. No admission record format changed.
 
-## Measured verification
+## CI collection correction
+
+The first CI fast matrix failed during collection: this change's top-level
+`evidence/` directory became a Python namespace package and shadowed an existing
+resource-verifier helper import. Relocating the feature's evidence under
+`docs/evidence/` removes that collision without changing existing runtime imports.
+The initially narrow checks did not collect that existing helper test module.
+
+After relocation, the exact isolated CI fast command passed: **1006 passed,
+2 skipped, 84 deselected**, stage 154.3 s, exit 0, no cleanup errors; complete
+stage result is in `fast-after-relocation/run-summary.json`. The focused namespace,
+process-proof and previously failing helper-import suite passed **39 tests in
+9.40 s** (`pytest-after-relocation.txt`). Combined source/wheel typing, diagnostic
+matching and installed-wheel origin/runtime verification all passed again; current
+resource API and runtime records are in `typing-after-relocation/`.
+
+## Initial measured verification
 
 - Final focused/configuration/process-proof and existing admission/fencing suite:
   **63 passed in 11.35 s**, `pytest-final-results.txt`.
@@ -25,8 +41,8 @@ observation/discovery remain queue-specific. No admission record format changed.
   matched its expected ruled
   errors (46/17/1/27/9/9/30/12 in the verifier's suite order).
 - Installed wheel Python 3.13.5: package origin verified; **460 passed, 1 skipped, 8 deselected**, exit 0.
-  Source and wheel were run independently; the verifier's combined source/wheel
-  diagnostic matching mode was not run.
+  Source and wheel initially ran independently; after relocation the combined
+  source/wheel diagnostic matching mode also passed.
 - Python 3.12/3.14 and the full repository integration matrix were not run.
 - Read-only post-test OS check found no owned namespace-test worker interpreters.
   The registered-handle exit audit also passed.

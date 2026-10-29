@@ -1,0 +1,25 @@
+{
+  "python_version": "3.13",
+  "interpreter": "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\venv-py313\\Scripts\\python.exe",
+  "probe": {
+    "sys_version": "3.13.5 (main, Jun 12 2025, 12:42:35) [MSC v.1943 64 bit (AMD64)]",
+    "sys_executable": "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\venv-py313\\Scripts\\python.exe",
+    "site_packages": [
+      "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\venv-py313",
+      "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\venv-py313\\Lib\\site-packages"
+    ],
+    "packages": [
+      {
+        "name": "superjobs",
+        "origin": "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\venv-py313\\Lib\\site-packages\\superjobs\\__init__.py",
+        "py_typed": "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\venv-py313\\Lib\\site-packages\\superjobs\\py.typed"
+      },
+      {
+        "name": "superjobs_contract_example",
+        "origin": "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\venv-py313\\Lib\\site-packages\\superjobs_contract_example\\__init__.py",
+        "py_typed": "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\venv-py313\\Lib\\site-packages\\superjobs_contract_example\\py.typed"
+      }
+    ],
+    "producer_only": "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\producer-only-py313"
+  }
+}

@@ -2,7 +2,8 @@
   "checker_version": "1.1.414",
   "source_verifier_exit": 0,
   "wheel_verifier_exit": 0,
-  "combined_source_wheel_comparison_run": false,
+  "combined_source_wheel_comparison_run": true,
+  "source_wheel_negative_matching": "OK",
   "suites": [
     {
       "mode": "source",
@@ -13,204 +14,9 @@
         "errorCount": 9,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.718
+        "timeInSec": 0.385
       },
-      "raw_sha256": "1e24b38969fad830e39264349bc45016ddcdf1370020f9f948e886f3671dc7d1"
-    },
-    {
-      "mode": "source",
-      "suite": "catalog_positive",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 0,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.519
-      },
-      "raw_sha256": "d8035fc595f655c9e493305ce5630d3e8b81d506d902bcf5dfde5e655959d13e"
-    },
-    {
-      "mode": "source",
-      "suite": "cli_negative",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 27,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.465
-      },
-      "raw_sha256": "347c67091c2341554ac00e21fea5acf8ffc5e1724201f85d1cd2bdbfa17bdeb8"
-    },
-    {
-      "mode": "source",
-      "suite": "cli_positive",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 7,
-        "errorCount": 0,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.831
-      },
-      "raw_sha256": "5f488c5ae73deb0f695f7aa95866aa081ddc2214bc2b900965a9a21502a298b7"
-    },
-    {
-      "mode": "source",
-      "suite": "discovery_negative",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 9,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.959
-      },
-      "raw_sha256": "2375c27f559452021631c5b0438f2128365e5cc503806795267eedaf20904718"
-    },
-    {
-      "mode": "source",
-      "suite": "discovery_positive",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 0,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 1.289
-      },
-      "raw_sha256": "83c45cfcc0fd4dff2ef81cab3eae78619dd631454ca06833495ce7788fbccd4b"
-    },
-    {
-      "mode": "source",
-      "suite": "negative",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 46,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.516
-      },
-      "raw_sha256": "0ef610b168704505af448042645617b44baa615184cc3acda18aec4ac38be65c"
-    },
-    {
-      "mode": "source",
-      "suite": "positive",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 3,
-        "errorCount": 0,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.8
-      },
-      "raw_sha256": "425ff9a77ae8a51b8fdfbe93a86d1efc89bcda06fab7528e457130f59f36aed0"
-    },
-    {
-      "mode": "source",
-      "suite": "producer_negative",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 17,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.769
-      },
-      "raw_sha256": "6af23213031197014c05477c9f1b001c4835d1a0d76c32de8f44012d55f4e099"
-    },
-    {
-      "mode": "source",
-      "suite": "producer_positive",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 0,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.759
-      },
-      "raw_sha256": "4c2c554c2280f459f589cbae6316443a5640e2b0c6e33ecdc05e74ae434ad942"
-    },
-    {
-      "mode": "source",
-      "suite": "resource_negative",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 12,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.836
-      },
-      "raw_sha256": "b2a83655c3a93955f15df6ccdf468b8e53a2a9010d560efeddd3b3112f2b13e9"
-    },
-    {
-      "mode": "source",
-      "suite": "resource_positive",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 0,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.996
-      },
-      "raw_sha256": "cac50dc1884a5d0163906ad31120c5edb6eeba7de3a5138f914fc1830bded048"
-    },
-    {
-      "mode": "source",
-      "suite": "strict_payload_negative",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 1,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.203
-      },
-      "raw_sha256": "8b1ac3d11b82e85988ec2974f6a3330c8d047fcea054c625bb224fd39ff8cab3"
-    },
-    {
-      "mode": "source",
-      "suite": "strict_payload_positive",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 0,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.211
-      },
-      "raw_sha256": "5af310a9dad0590bca0f29246e8be963955758d10fa1e63f30cdac972a4ed7ee"
-    },
-    {
-      "mode": "source",
-      "suite": "worker_negative",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 30,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.706
-      },
-      "raw_sha256": "5d90e6ce91cdcdf13c9adff70c095a6836c8a7a92a958d62ccabcccd7bbd94c5"
-    },
-    {
-      "mode": "source",
-      "suite": "worker_positive",
-      "checker_version": "1.1.414",
-      "diagnostic_summary": {
-        "filesAnalyzed": 1,
-        "errorCount": 0,
-        "warningCount": 0,
-        "informationCount": 0,
-        "timeInSec": 0.644
-      },
-      "raw_sha256": "8c17fb27b27f37be003333db567abb73c29fb4364098636c5ec8c81485e5996b"
+      "raw_sha256": "5f283197926e287880514b44d3033df8f7c684f0be49a23cf2e5d8fef8c7663d"
     },
     {
       "mode": "wheel",
@@ -221,9 +27,22 @@
         "errorCount": 9,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.387
+        "timeInSec": 0.439
       },
-      "raw_sha256": "dc20fe1d347db2bfd41b66529911d1da122105bd38ba186dec7a6438e865430f"
+      "raw_sha256": "71e884352c107b29914daddf2a1c5329b8e1fb70beafe5f76eaaad307f46261b"
+    },
+    {
+      "mode": "source",
+      "suite": "catalog_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.458
+      },
+      "raw_sha256": "d5326772dce5718d8e6c890118c2cca2131df248f11096616983c6468650b19a"
     },
     {
       "mode": "wheel",
@@ -234,9 +53,22 @@
         "errorCount": 0,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.448
+        "timeInSec": 0.463
       },
-      "raw_sha256": "e94441dcf79816d023d8778784d916a159940d8e315d89706a5dd5bea5cd2883"
+      "raw_sha256": "490ad5f2a95e5e8741d8d81a1974764dd75fbf3e5edab953868ab9a4904f7de6"
+    },
+    {
+      "mode": "source",
+      "suite": "cli_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 27,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.434
+      },
+      "raw_sha256": "0f82f50ad120c19fbc98b92a0d6998926267a4d37ae2b7438a108c8075255fd5"
     },
     {
       "mode": "wheel",
@@ -247,9 +79,22 @@
         "errorCount": 27,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.444
+        "timeInSec": 0.457
       },
-      "raw_sha256": "96ea94aa8452115775e18b535908ff9e15d7f53dd7857129ab99f84d060c8854"
+      "raw_sha256": "ad17020becc1b33e525236e70078f6438ba351b9cee706fb187a864dff79e1d6"
+    },
+    {
+      "mode": "source",
+      "suite": "cli_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 7,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.79
+      },
+      "raw_sha256": "3bc95148f411b2687b804de082d6965d0abe81ccb0507df2e1c5c59d818f0986"
     },
     {
       "mode": "wheel",
@@ -260,9 +105,22 @@
         "errorCount": 0,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.719
+        "timeInSec": 0.755
       },
-      "raw_sha256": "b6ea41ace9a3947431ebaab3f0e01b69aa6f7bbd00bfb7283557bae5bb63468a"
+      "raw_sha256": "bb5d3104b850217e74b707d7e66bd82dc66d2bd5b462653ce48878645090ca4f"
+    },
+    {
+      "mode": "source",
+      "suite": "discovery_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 9,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.788
+      },
+      "raw_sha256": "8974fe9b398b9578b98049533867ac462e50784edb76e2f30eda6136ca395bbc"
     },
     {
       "mode": "wheel",
@@ -273,9 +131,22 @@
         "errorCount": 9,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.753
+        "timeInSec": 0.782
       },
-      "raw_sha256": "88e1a05fc8cb614696ed11858e9f28221279f6843ff0eb6b7e5c100599b4de44"
+      "raw_sha256": "ae6240bc5bdc926306fac1417452600959d044e40accbd930141f502112808f9"
+    },
+    {
+      "mode": "source",
+      "suite": "discovery_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.814
+      },
+      "raw_sha256": "1c5cc5b712b2ef80da084fc2dff7fbae9c866ea743e7901fe4b1899c3aa2e851"
     },
     {
       "mode": "wheel",
@@ -288,7 +159,20 @@
         "informationCount": 0,
         "timeInSec": 0.77
       },
-      "raw_sha256": "d54a04f5d98dbf88ff123797c2a73f9e5d245ca28649df88d254146ec28b7465"
+      "raw_sha256": "fe4101b3bed4844c2256f12fe8e1ae44b2715fce5782f4520bcdeaac34b6d9f3"
+    },
+    {
+      "mode": "source",
+      "suite": "negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 46,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.451
+      },
+      "raw_sha256": "7609a5533da895f98d511155c844ee77337fbfb83fd1285e04b88e8d2a5d34c8"
     },
     {
       "mode": "wheel",
@@ -299,9 +183,22 @@
         "errorCount": 46,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.453
+        "timeInSec": 0.492
       },
-      "raw_sha256": "ec09ae9f6bc5ae9a5898833fbd836e708ea9940726da7e1e7824f4f1d5d39906"
+      "raw_sha256": "9815c106f6ab2a58d4a1cf119bc0b02219465ae6f493d1ede9b9e35729919293"
+    },
+    {
+      "mode": "source",
+      "suite": "positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 3,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.711
+      },
+      "raw_sha256": "83c937e14b2fd3d95992059598ba850e17d65d54caf36856580ad15e249d6b80"
     },
     {
       "mode": "wheel",
@@ -312,9 +209,22 @@
         "errorCount": 0,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.711
+        "timeInSec": 0.736
       },
-      "raw_sha256": "1f117f3bccf6ea28c0f4e81187a5ffe09a2e8bc498f1dbd81fdce6ac9ff75b22"
+      "raw_sha256": "9671985f74c24f7426b524eae6db149681057b905a79952ab4fc99cf36663d04"
+    },
+    {
+      "mode": "source",
+      "suite": "producer_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 17,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.744
+      },
+      "raw_sha256": "ef1c6001516aede91cb10affec8f7d346e4a3aaf0f40f676c915cdecd8b2822d"
     },
     {
       "mode": "wheel",
@@ -325,9 +235,22 @@
         "errorCount": 17,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.738
+        "timeInSec": 0.739
       },
-      "raw_sha256": "48d0149d4f728fcccfc7a50f2591f05d13500a494616bb73539bd978ecb4cf15"
+      "raw_sha256": "b04f715c71d5a527322c6ef4c55512351fda31778d5040d9bf0002330ca5048f"
+    },
+    {
+      "mode": "source",
+      "suite": "producer_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.675
+      },
+      "raw_sha256": "1d1213419a1c83bdfdc1c1fe9740fed38dc5de7bbd0de2ce40f259b8dff1328a"
     },
     {
       "mode": "wheel",
@@ -338,9 +261,22 @@
         "errorCount": 0,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.663
+        "timeInSec": 0.686
       },
-      "raw_sha256": "d0c86886ec07ce5c6053bc6e1498cecd43255685c49f8a35d6ee9dc2109b7163"
+      "raw_sha256": "f3f72ac744b59ca38cba5b6a744e5808e50270fb49d07b7dae18c0f59fcb49d1"
+    },
+    {
+      "mode": "source",
+      "suite": "resource_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 12,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.744
+      },
+      "raw_sha256": "be0ce98ac68189626c911d2eeae8f507ed8b5d492ae39e1394bd128e2af7a350"
     },
     {
       "mode": "wheel",
@@ -351,9 +287,22 @@
         "errorCount": 12,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.725
+        "timeInSec": 0.728
       },
-      "raw_sha256": "4b0ffda8c8ed7f545642554e22cd844771d4cde3bb1cd9238b96e96461eef76f"
+      "raw_sha256": "bc96caae83ef0da2e39bc02d3ed99c18068304865a91d4d88d4130ad7386afa8"
+    },
+    {
+      "mode": "source",
+      "suite": "resource_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.83
+      },
+      "raw_sha256": "5eb2f0a348efe24c69dca0e5d632bc18c45a148cfa93d4e18185beae9da83a8f"
     },
     {
       "mode": "wheel",
@@ -364,9 +313,22 @@
         "errorCount": 0,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.801
+        "timeInSec": 0.782
       },
-      "raw_sha256": "8a143fb3fc8d4bbba28d063d2ba4da0dc6b7bea59408efab4597ebf07d369abb"
+      "raw_sha256": "e78b7d21605a09da4add968104af69a1acf6e0b88e5e89d7de4d77cde1485fe9"
+    },
+    {
+      "mode": "source",
+      "suite": "strict_payload_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 1,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.191
+      },
+      "raw_sha256": "efb4172101856cdebdca680dd4ba8b49ecd05b730d47bd4d7c88cd240f0f41bc"
     },
     {
       "mode": "wheel",
@@ -377,9 +339,22 @@
         "errorCount": 1,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.193
+        "timeInSec": 0.198
       },
-      "raw_sha256": "c312924cfe37d02a3f2646101b9e027ea437bff23961be0205a3e24af08d6f30"
+      "raw_sha256": "da56eeda556bbb3689ec25b0d390c9784ac92dc8145fff4cf65690f2920602ce"
+    },
+    {
+      "mode": "source",
+      "suite": "strict_payload_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.199
+      },
+      "raw_sha256": "ed3057dfe15319bc8d33e4c6208a32b3579fc151b467573601d0e50a874620d5"
     },
     {
       "mode": "wheel",
@@ -390,9 +365,22 @@
         "errorCount": 0,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.197
+        "timeInSec": 0.199
       },
-      "raw_sha256": "0367d8f2b281488c4d0ede3b99885a92bbc847623ca19dea487e01988ff57536"
+      "raw_sha256": "543141cab2d9a93eacebf27ef63a7923e20cc234cc4c1cc4767e8b4b44e3e63f"
+    },
+    {
+      "mode": "source",
+      "suite": "worker_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 30,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.572
+      },
+      "raw_sha256": "297d4d2f7faf9e7c97a668777c55f533f5696d84dc6e5fc2369c26a1a05f7604"
     },
     {
       "mode": "wheel",
@@ -403,9 +391,22 @@
         "errorCount": 30,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.558
+        "timeInSec": 0.556
       },
-      "raw_sha256": "851f052a74514f9f4d976656b0e53d7140d5d85e124891f2f7c185e4aec6c1a4"
+      "raw_sha256": "3249c0d9d318e6ad166d042aef1de2e32708b20041967d84e541d145fa25a043"
+    },
+    {
+      "mode": "source",
+      "suite": "worker_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.58
+      },
+      "raw_sha256": "d6b141a74b876a71bcd56011a712264642168501a7346ae6ad848ec91b5a8c9d"
     },
     {
       "mode": "wheel",
@@ -416,9 +417,9 @@
         "errorCount": 0,
         "warningCount": 0,
         "informationCount": 0,
-        "timeInSec": 0.576
+        "timeInSec": 0.556
       },
-      "raw_sha256": "4648625266b15dbc95d7c1b7c59d6488f3fa6480e31214ee9e6d459253062a87"
+      "raw_sha256": "2f2f35bb0c05d5fedfa2c2db303666c28f31db5348868efdeb6ac5136a2a9a45"
     }
   ]
 }

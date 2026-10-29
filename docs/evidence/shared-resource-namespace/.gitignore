@@ -11,3 +11,10 @@
 !/typing-wheel-independent/resource_positive-wheel-pyright.json
 !/typing-wheel-independent/py313-origin.json
 !/typing-wheel-independent/py313-runtime.json
+/typing-after-relocation/*
+!/typing-after-relocation/resource_positive-source-meta.json
+!/typing-after-relocation/resource_positive-source-pyright.json
+!/typing-after-relocation/resource_positive-wheel-meta.json
+!/typing-after-relocation/resource_positive-wheel-pyright.json
+!/typing-after-relocation/py313-origin.json
+!/typing-after-relocation/py313-runtime.json
