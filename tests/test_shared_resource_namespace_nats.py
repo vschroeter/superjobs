@@ -11,7 +11,7 @@ import pytest
 
 from superjobs import HandlerCatalog, JobState, JobSucceeded, SuperJobs
 from superjobs.jobs.execution import JobFailedOutcome
-from superjobs.resources import ReleaseOutcome, TerminationConfirmation
+from superjobs.resources import ReleaseOutcome, TerminationConfirmation, WaitingExecutionCompleteness
 from superjobs.resources.models import ResourceAvailability
 from tests.support.shared_resource_namespace.constants import HOLD_JOB, RESOURCE_KEY
 from tests.support.shared_resource_namespace.orchestration import (
@@ -190,6 +190,15 @@ async def test_shared_resource_namespace_cross_process_exclusion(
             assert claim_for_execution(snap_a, handle_a.id) is not None
             assert claim_for_execution(snap_b, handle_a.id) is not None
             await asyncio.sleep(0.05)
+
+        # #68's completion observation stays work-queue scoped even while the
+        # physical resource owner and execution claim are shared across queues.
+        waiting_a = await observer_a.resources.waiting_executions()
+        waiting_b = await observer_b.resources.waiting_executions()
+        assert waiting_a.completeness is WaitingExecutionCompleteness.COMPLETE
+        assert waiting_b.completeness is WaitingExecutionCompleteness.COMPLETE
+        assert waiting_a.entries == ()
+        assert {entry.execution_id for entry in waiting_b.entries} == {handle_b.id}
 
         await publish_release(nats_url, config_a, handle_a.id)
         outcome_a = await asyncio.wait_for(handle_a.outcome(), timeout=15.0)

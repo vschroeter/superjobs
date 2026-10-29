@@ -1,6 +1,6 @@
 # Independent shared resource-namespace verification
 
-Date: 2026-10-29. Branch: `codex/shared-resource-namespace`. Base: `dd8116c`.
+Date: 2026-10-29. Branch: `codex/shared-resource-namespace`. Initial base: `dd8116c`; integrated main base: `45d299b` (#68).
 All live transport tests used an owned ephemeral loopback NATS server/store. No
 production broker, old job, application database, model, or synthesis run was used.
 
@@ -139,3 +139,16 @@ broker-check seams can supply a private queue/workspace, but must coherently use
 the production admission namespace and physical host ID. Never infer permission
 to recover a foreign owner from missing metadata in private diagnostic storage.
 Never delete/reset the shared admission bucket as diagnostic queue cleanup.
+
+## Integration after main PR #68
+
+While #69 was being checked, main advanced to `45d299b` with persisted waiting
+execution observation. That exact main was merged normally into the isolated
+namespace branch without conflicts; no other checkout or branch was modified.
+An additional assertion in the existing real cross-process exclusion test proves
+both observers still see the same admission owner/claim, while completion-backed
+waiting observation remains work-queue scoped: A's complete waiting view is empty
+and B's complete waiting view contains only its blocked execution. The combined
+namespace/process/helper and #68 waiting-observation suite passed **68 tests in
+13.64 s** (`pytest-main68-integration.txt`). Final hosted checks and independent
+reviews must refer to this integrated head; older green heads are historical.

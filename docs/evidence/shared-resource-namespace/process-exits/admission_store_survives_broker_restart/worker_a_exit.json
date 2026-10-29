@@ -1,13 +1,13 @@
 {
   "worker_label": "a",
-  "interpreter_pid": 39736,
+  "interpreter_pid": 92948,
   "launcher_exit": 3,
   "interpreter_terminated": true,
   "stderr_tail": "nats: encountered error\nTraceback (most recent call last):\n  File \"C:\\Users\\schoc\\AppData\\Roaming\\uv\\python\\cpython-3.13-windows-x86_64-none\\Lib\\asyncio\\windows_events.py\", line 463, in finish_socket_func\n    return ov.getresult()\n           ~~~~~~~~~~~~^^\nOSError: [WinError 64] Der angegebene Netzwerkname ist nicht mehr verf\u00fcgbar\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\schoc\\Documents\\Git\\Wildau\\NATS\\superjobs\\.venv\\Lib\\site-packages\\nats\\aio\\client.py\", line 1594, in _attempt_reconnect\n    await self._transport.wait_closed()\n  File \"C:\\Users\\schoc\\Documents\\Git\\Wildau\\NATS\\superjobs\\.venv\\Lib\\site-packages\\nats\\aio\\transport.py\", line 176, in wait_closed\n    return await self._io_writer.wait_closed()\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\schoc\\AppData\\Roaming\\uv\\python\\cpython-3.13-windows-x86_64-none\\Lib\\asyncio\\streams.py\", line 358, in wait_closed\n    await self._protocol._get_close_waiter(self)\n  File \"C:\\Users\\schoc\\AppData\\Roaming\\uv\\python\\cpython-3.13-windows-x86_64-none\\Lib\\asyncio\\proactor_events.py\", line 286, in _loop_reading\n    length = fut.result()\n  File \"C:\\Users\\schoc\\AppData\\Roaming\\uv\\python\\cpython-3.13-windows-x86_64-none\\Lib\\asyncio\\windows_events.py\", line 804, in _poll\n    value = callback(transferred, key, ov)\n  File \"C:\\Users\\schoc\\AppData\\Roaming\\uv\\python\\cpython-3.13-windows-x86_64-none\\Lib\\asyncio\\windows_events.py\", line 467, in finish_socket_func\n    raise ConnectionResetError(*exc.args)\nConnectionResetError: [WinError 64] Der angegebene Netzwerkname ist nicht mehr verf\u00fcgbar\nConnectionReconnectingError: nats: connection reconnecting\n",
   "termination": {
-    "launcher_pid": 39736,
-    "interpreter_pid": 39736,
-    "worker_id": "c9a8626df72f482f82938a5d1ec80ab7",
+    "launcher_pid": 92948,
+    "interpreter_pid": 92948,
+    "worker_id": "0322bc08909042379bbd8c6c7c5b4980",
     "incarnation_id": "1",
     "interpreter_terminated": true,
     "launcher_exit": 3,

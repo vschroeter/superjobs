@@ -1,13 +1,13 @@
 {
   "worker_label": "b",
-  "interpreter_pid": 41192,
+  "interpreter_pid": 77556,
   "launcher_exit": 0,
   "interpreter_terminated": true,
   "stderr_tail": "",
   "termination": {
-    "launcher_pid": 41192,
-    "interpreter_pid": 41192,
-    "worker_id": "0976b6de63984475928539c7e9f76189",
+    "launcher_pid": 77556,
+    "interpreter_pid": 77556,
+    "worker_id": "d7a943e8862f430192b3944d9e0fcee6",
     "incarnation_id": "1",
     "interpreter_terminated": true,
     "launcher_exit": 0,
