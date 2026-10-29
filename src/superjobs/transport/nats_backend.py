@@ -9,6 +9,7 @@ from collections import defaultdict
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
+from uuid import UUID
 
 import msgpack
 from faststream.nats import JStream, NatsBroker
@@ -22,7 +23,6 @@ from nats.js.errors import (
 )
 
 from superjobs.discovery.config import PresenceConfig
-from superjobs.discovery.errors import DiscoveryUnavailableError
 from superjobs.discovery.nats import NatsDiscoveryBackend
 from superjobs.exceptions.jobs import (
     IdempotencyConflictError,
@@ -47,9 +47,14 @@ from superjobs.resources.errors import (
     ResourceStoreUnavailableError,
     WaitingExecutionUnavailableError,
 )
+from superjobs.resources.keys import validate_resource_key
 from superjobs.resources.models import AdmissionOwner
-from superjobs.resources.nats import NatsResourceAdmissionStore, kv_bucket_verified_empty
-from superjobs.resources.waiting_execution import build_waiting_execution_view
+from superjobs.resources.nats import NatsResourceAdmissionStore
+from superjobs.resources.waiting_execution import (
+    clear_waiting_resource_publication,
+    scan_completion_kv_for_waiting_view,
+    waiting_pin_blocks_new_publication,
+)
 from superjobs.runtime_resources import resource_admission_for_backend
 from superjobs.transport.admission_record import (
     admission_owner_from_wire,
@@ -389,75 +394,15 @@ class NatsJobBackend(JobBackend):
             raise WaitingExecutionUnavailableError(
                 "Completion store is not available for waiting-execution observation",
             )
-        try:
-            verified_empty = await kv_bucket_verified_empty(completion_kv)
-        except ResourceStoreUnavailableError as error:
-            raise WaitingExecutionUnavailableError(str(error)) from error
-
-        if verified_empty:
-            return build_waiting_execution_view(
-                evaluated_at=evaluated_at,
-                records=[],
-                max_entries=max_entries,
-                partial=False,
-                scan_truncated=False,
-            )
-
-        try:
-            scanned_keys, scan_truncated = await self.discovery_backend.bounded_kv_meta_key_scan(
-                completion_kv,
-                max_keys=max_scan_keys,
-                deadline_monotonic=scan_deadline_monotonic,
-            )
-        except DiscoveryUnavailableError as error:
-            raise WaitingExecutionUnavailableError(str(error)) from error
-        except APIError as error:
-            raise WaitingExecutionUnavailableError(
-                "Unable to list completion records for waiting-execution observation",
-            ) from error
-
-        if not scanned_keys and not scan_truncated:
-            try:
-                if not await kv_bucket_verified_empty(completion_kv):
-                    raise WaitingExecutionUnavailableError(
-                        "Completion key scan was empty while the bucket retains records",
-                    )
-            except ResourceStoreUnavailableError as error:
-                raise WaitingExecutionUnavailableError(str(error)) from error
-
-        waiting_records: list[ExecutionRecord] = []
-        partial = False
-        for key in sorted(scanned_keys):
-            if time.monotonic() >= scan_deadline_monotonic:
-                scan_truncated = True
-                break
-            try:
-                entry = await completion_kv.get(key)
-            except NotFoundError:
-                partial = True
-                continue
-            except APIError as error:
-                raise WaitingExecutionUnavailableError(
-                    "Unable to read completion records for waiting-execution observation",
-                ) from error
-            if entry.value is None:
-                partial = True
-                continue
-            try:
-                record = _record_from_wire(_unpack(entry.value))
-            except Exception:
-                partial = True
-                continue
-            if record.state is not JobState.WAITING_FOR_RESOURCE:
-                continue
-            waiting_records.append(record)
-
-        return build_waiting_execution_view(
+        return await scan_completion_kv_for_waiting_view(
+            completion_kv=completion_kv,
+            discovery_backend=self.discovery_backend,
             evaluated_at=evaluated_at,
-            records=waiting_records,
             max_entries=max_entries,
-            partial=partial,
-            scan_truncated=scan_truncated,
+            max_scan_keys=max_scan_keys,
+            scan_deadline_monotonic=scan_deadline_monotonic,
+            record_from_wire=_record_from_wire,
+            unpack=_unpack,
         )
 
     async def stop(self) -> None:
@@ -1332,6 +1277,8 @@ class NatsJobBackend(JobBackend):
         expected_admission_owner: AdmissionOwner | None = None,
         target_state: JobState = JobState.RUNNING,
         admission_owner: AdmissionOwner | None = None,
+        waiting_resource_key: str | None = None,
+        waiting_resource_invocation_id: UUID | None = None,
     ) -> None:
         terminal_event: JobFailed | JobCancelled | None = None
 
@@ -1378,9 +1325,31 @@ class NatsJobBackend(JobBackend):
                     return current, False, None, None
                 if current.state not in _WAITING_OR_PENDING:
                     return current, False, None, None
+                if waiting_pin_blocks_new_publication(
+                    current,
+                    attempt=attempt,
+                    waiting_resource_invocation_id=waiting_resource_invocation_id,
+                ):
+                    return current, False, None, None
+                if (
+                    current.waiting_resource_invocation_id is not None
+                    and waiting_resource_invocation_id is not None
+                    and current.waiting_resource_invocation_id
+                    != waiting_resource_invocation_id
+                ):
+                    clear_waiting_resource_publication(current)
                 current.state = JobState.WAITING_FOR_RESOURCE
                 current.attempt = attempt
                 current.next_attempt_at = None
+                if waiting_resource_invocation_id is not None:
+                    current.waiting_resource_invocation_id = (
+                        waiting_resource_invocation_id
+                    )
+                if waiting_resource_key is not None:
+                    current.waiting_resource_key = validate_resource_key(
+                        waiting_resource_key,
+                    )
+                current.waiting_resource_attempt = attempt
                 return current, True, None, None
             if target_state is JobState.RUNNING:
                 owner_active = admission_owner
@@ -1392,6 +1361,7 @@ class NatsJobBackend(JobBackend):
                 current.attempt = attempt
                 current.started_at = current.started_at or datetime.now(UTC)
                 current.next_attempt_at = None
+                clear_waiting_resource_publication(current)
                 if admission_owner is not None:
                     current.admission_owner_wire = admission_owner_to_wire(
                         admission_owner,
@@ -1487,6 +1457,7 @@ class NatsJobBackend(JobBackend):
                 current.state = JobState.PENDING
                 current.next_attempt_at = next_attempt_at
                 current.progress = None
+            clear_waiting_resource_publication(current)
             return current, True, None, owner_execution
 
         updated = await self._cas_update_completion(
@@ -1596,6 +1567,13 @@ def _record_to_wire(record: ExecutionRecord) -> dict[str, Any]:
             else None
         ),
         "admission_owner_wire": record.admission_owner_wire,
+        "waiting_resource_key": record.waiting_resource_key,
+        "waiting_resource_invocation_id": (
+            str(record.waiting_resource_invocation_id)
+            if record.waiting_resource_invocation_id is not None
+            else None
+        ),
+        "waiting_resource_attempt": record.waiting_resource_attempt,
     }
 
 
@@ -1653,6 +1631,17 @@ def _record_from_wire(value: dict[str, Any]) -> ExecutionRecord:
             else None
         ),
         admission_owner_wire=value.get("admission_owner_wire"),
+        waiting_resource_key=value.get("waiting_resource_key"),
+        waiting_resource_invocation_id=(
+            UUID(str(value["waiting_resource_invocation_id"]))
+            if value.get("waiting_resource_invocation_id")
+            else None
+        ),
+        waiting_resource_attempt=(
+            int(value["waiting_resource_attempt"])
+            if value.get("waiting_resource_attempt") is not None
+            else None
+        ),
     )
 
 

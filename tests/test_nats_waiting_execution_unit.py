@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 from nats.js.errors import APIError, NotFoundError
@@ -23,6 +24,7 @@ def _bucket_status(*, messages: int) -> MagicMock:
 
 def _waiting_record(execution_id: str) -> ExecutionRecord:
     evaluated_at = datetime.now(tz=UTC)
+    invocation_id = uuid4()
     return ExecutionRecord(
         identity=JobIdentity(name="tests.waiting", version="v1"),
         job_id=execution_id,
@@ -35,6 +37,10 @@ def _waiting_record(execution_id: str) -> ExecutionRecord:
         deadline=None,
         created_at=evaluated_at,
         state=JobState.WAITING_FOR_RESOURCE,
+        attempt=1,
+        waiting_resource_key="device.gpu0",
+        waiting_resource_invocation_id=invocation_id,
+        waiting_resource_attempt=1,
     )
 
 
@@ -122,7 +128,7 @@ async def test_waiting_view_reads_via_bounded_watchall(
     )
 
     assert {item.execution_id for item in view.entries} == {"exec-wait"}
-    assert view.completeness is WaitingExecutionCompleteness.COMPLETE
+    assert view.completeness is WaitingExecutionCompleteness.PARTIAL
 
 
 @pytest.mark.asyncio
@@ -164,7 +170,7 @@ async def test_waiting_view_bounded_scan_keys_truncates(
         scan_deadline_monotonic=time.monotonic() + 5.0,
     )
 
-    assert view.completeness is WaitingExecutionCompleteness.TRUNCATED
+    assert view.completeness is WaitingExecutionCompleteness.PARTIAL
     assert len(view.entries) == 2
 
 
@@ -238,3 +244,52 @@ async def test_waiting_view_rejects_ambiguous_empty_watch(
             evaluated_at=datetime.now(tz=UTC), max_entries=10, max_scan_keys=100,
             scan_deadline_monotonic=time.monotonic() + 5.0,
         )
+
+
+@pytest.mark.asyncio
+async def test_waiting_view_partial_when_unbound_waiting_pin(
+    started_backend: NatsJobBackend,
+) -> None:
+    kv = started_backend._completion_kv
+    kv.status = AsyncMock(return_value=_bucket_status(messages=1))
+    stale = _waiting_record("exec-stale")
+    stale.attempt = 2
+    _install_watchall_keys(kv, ("exec-stale",))
+    entry = MagicMock()
+    entry.value = _wire_record(stale)
+    kv.get = AsyncMock(return_value=entry)
+
+    view = await started_backend.read_waiting_execution_view(
+        evaluated_at=datetime.now(tz=UTC),
+        max_entries=10,
+        max_scan_keys=100,
+        scan_deadline_monotonic=time.monotonic() + 5.0,
+    )
+
+    assert len(view.entries) == 1
+    assert view.entries[0].execution_id == "exec-stale"
+    assert view.completeness is WaitingExecutionCompleteness.PARTIAL
+
+
+@pytest.mark.asyncio
+async def test_waiting_view_partial_when_legacy_waiting_lacks_resource_key(
+    started_backend: NatsJobBackend,
+) -> None:
+    kv = started_backend._completion_kv
+    kv.status = AsyncMock(return_value=_bucket_status(messages=1))
+    _install_watchall_keys(kv, ("exec-legacy",))
+    legacy = _waiting_record("exec-legacy")
+    legacy.waiting_resource_key = None
+    entry = MagicMock()
+    entry.value = _wire_record(legacy)
+    kv.get = AsyncMock(return_value=entry)
+
+    view = await started_backend.read_waiting_execution_view(
+        evaluated_at=datetime.now(tz=UTC),
+        max_entries=10,
+        max_scan_keys=100,
+        scan_deadline_monotonic=time.monotonic() + 5.0,
+    )
+
+    assert view.entries == ()
+    assert view.completeness is WaitingExecutionCompleteness.PARTIAL

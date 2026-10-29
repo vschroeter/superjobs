@@ -22,7 +22,7 @@ boolean.
 | Physical checks | No generic GPU/OS memory or process verification; only durable ownership and application cleanup/termination paths. |
 | Snapshots | `jobs.resources.snapshot()` is diagnostic; records are not TTL-trimmed into automatic release. |
 | Waiting | `JobState.WAITING_FOR_RESOURCE` (`waiting_for_resource`); waiting does not spend an inference retry merely because another worker holds the device. |
-| Waiting observation | `jobs.resources.waiting_executions()` requires a started transport (normal `start()` may provision JetStream buckets); it does not inspect a fresh broker without that provisioning path. The call scans durable completion records for `waiting_for_resource` only— not `pending` deliveries, not admission claims alone, and not executions before admission is stored on the record. `WaitingExecutionCompleteness` is coverage of matching records within bounded time/key limits, not every execution actually blocked on a resource; views may be truncated, partial, or stale under broker races. The read path is observation-only (no admission writes or completion KV puts). NATS enumerates completion keys via a short-lived ephemeral `watchall` snapshot capped by `max_scan_keys`; in-memory transport walks stored executions up to the same cap without copying the full map. |
+| Waiting observation | Bounded read-only scan of completion records. Listed entries are durable ``waiting_for_resource`` records with a persisted requested resource key, labeled ``WaitingExecutionEvidence.PERSISTED_HISTORICAL`` (historical evidence only; matching attempt or invocation metadata does not prove the writer is alive). Any scanned ``waiting_for_resource`` or ``pending`` record marks the view ``partial`` because liveness cannot be verified. Legacy waiting records without a key are omitted and also mark ``partial``. ``pending`` records never appear as entries. ``jobs.resources.waiting_executions()`` uses the started runtime transport (normal ``start()`` may provision JetStream buckets). ``read_waiting_executions_from_broker()`` opens existing completion KV read-only without provisioning stores; a missing completion bucket yields ``WaitingExecutionUnavailableError`` (absence does not prove an unused namespace). An existing empty completion bucket can yield an empty complete view. Scans are non-atomic; ``evaluated_at`` is when the scan started; stored evidence may be older and races can yield stale, partial, truncated, or empty views distinct from ``WaitingExecutionUnavailableError``. Observation never acquires, releases, reconciles, or writes admission or completion state. NATS uses a short-lived ephemeral ``watchall`` snapshot capped by ``max_scan_keys``. |
 | Heartbeat / TTL | Uncertainty retains ownership; no takeover from elapsed heartbeat or presence expiry alone. |
 | Providers | Process-lifetime **provider + `resources=`** is rejected before handler entry (v1). |
 | Local CLI | Resource-bound handlers are **rejected** for local `run` paths that skip broker admission; **remote `submit`** remains available. |
@@ -48,7 +48,7 @@ Controller and contract packages import admission types without worker handlers:
 - Stores: `InMemoryResourceAdmissionStore`, `NatsResourceAdmissionStore`,
   `ResourceAdmission`.
 - Observation: `WaitingExecutionView`, `read_waiting_executions()`,
-  `supports_waiting_execution_observation()`.
+  `read_waiting_executions_from_broker()`, `supports_waiting_execution_observation()`.
 
 ### Worker runtime
 

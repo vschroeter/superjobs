@@ -35,12 +35,18 @@ class RuntimeResources:
         *,
         max_entries: int | None = None,
     ) -> WaitingExecutionView:
-        """Read-only view of persisted ``waiting_for_resource`` completion records.
+        """Read-only view of persisted resource-waiting completion records.
 
         Requires the runtime transport to have started already; normal startup may
-        provision JetStream buckets. Completeness reflects bounded scan coverage, not
-        every execution actually waiting on a resource. The read path does not mutate
-        admission or write broker completion data.
+        provision JetStream buckets. Entries reflect durable
+        ``waiting_for_resource`` records with a requested resource key; they are
+        historical evidence only and do not prove live blocking. Any scanned
+        ``waiting_for_resource`` or ``pending`` record marks the view ``partial``
+        because liveness cannot be verified from observation alone.
+        ``evaluated_at`` is when the scan started; stored evidence may be older;
+        concurrent writers may race the view during and after the scan.
+        Completeness reflects bounded scan coverage, not live contention.
+        The read path does not mutate admission or write broker completion data.
         """
         return await read_waiting_executions(
             self._backend,

@@ -36,6 +36,7 @@ from superjobs.resources.models import (
     UnavailableReason,
     WaitingExecutionCompleteness,
     WaitingExecutionEntry,
+    WaitingExecutionEvidence,
     WaitingExecutionView,
     WorkerIncarnation,
     parse_exclusive_resource_requirement,
@@ -46,6 +47,7 @@ from superjobs.resources.nats import NatsResourceAdmissionStore
 from superjobs.resources.waiting_execution import (
     DEFAULT_MAX_WAITING_EXECUTION_ENTRIES,
     read_waiting_executions,
+    read_waiting_executions_from_broker,
     supports_waiting_execution_observation,
 )
 
@@ -81,12 +83,14 @@ __all__ = [
     "StoredExecutionClaim",
     "StoredResourceRecord",
     "read_waiting_executions",
+    "read_waiting_executions_from_broker",
     "supports_waiting_execution_observation",
     "TerminationConfirmation",
     "UnsupportedWaitingExecutionBackendError",
     "UnavailableReason",
     "WaitingExecutionCompleteness",
     "WaitingExecutionEntry",
+    "WaitingExecutionEvidence",
     "WaitingExecutionObservationError",
     "WaitingExecutionUnavailableError",
     "WaitingExecutionView",
