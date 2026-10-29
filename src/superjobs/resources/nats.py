@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 import nats.errors
@@ -18,6 +19,7 @@ from nats.js.kv import KeyValue
 if TYPE_CHECKING:
     from faststream.nats import NatsBroker
 
+from superjobs.discovery.nats import NatsDiscoveryBackend
 from superjobs.resources.config import ResourceAdmissionConfig
 from superjobs.resources.errors import (
     ResourceConfigurationError,
@@ -77,15 +79,18 @@ async def list_kv_keys_with_verified_empty(
     ambiguous_empty_message: str,
     list_failure_message: str = "Unable to list JetStream KV keys",
     status_failure_message: str = "Unable to read JetStream KV bucket state",
+    list_keys: Callable[[KeyValue], Awaitable[list[str]]],
 ) -> tuple[str, ...]:
     """List KV keys, treating ``NoKeysError`` as empty only when the bucket is verified empty.
 
-    ``kv.keys()`` returns the full key set; callers apply scan limits afterward.
+    The listing returns the full key set; callers apply scan limits afterward.
     This is not a constant-memory iterator over bucket contents.
     """
     for attempt in range(_KV_KEYS_LIST_RETRY_ATTEMPTS):
         try:
-            keys = await kv.keys()
+            keys = await list_keys(kv)
+            if not keys:
+                raise NoKeysError
             return tuple(keys)
         except NoKeysError as error:
             try:
@@ -99,7 +104,7 @@ async def list_kv_keys_with_verified_empty(
             if attempt + 1 >= _KV_KEYS_LIST_RETRY_ATTEMPTS:
                 raise ResourceStoreUnavailableError(ambiguous_empty_message) from error
             await asyncio.sleep(_KV_KEYS_LIST_RETRY_DELAY_S)
-        except (APIError, nats.errors.Error) as error:
+        except Exception as error:
             raise ResourceStoreUnavailableError(list_failure_message) from error
     raise ResourceStoreUnavailableError(list_failure_message)
 
@@ -192,6 +197,9 @@ class NatsResourceAdmissionStore:
         self._provision = provision
         self._kv: KeyValue | None = None
         self._kv_init_lock = asyncio.Lock()
+        self._key_scanner = NatsDiscoveryBackend(
+            broker, subject_prefix=subject_prefix, discovery_provision=False,
+        )
 
     @property
     def bucket_name(self) -> str:
@@ -293,6 +301,7 @@ class NatsResourceAdmissionStore:
             ),
             list_failure_message="Unable to list admission KV keys",
             status_failure_message="Unable to read admission KV bucket state",
+            list_keys=self._key_scanner._list_kv_keys,
         )
 
     async def read_snapshot(self, *, evaluated_at: datetime) -> AdmissionSnapshot:
