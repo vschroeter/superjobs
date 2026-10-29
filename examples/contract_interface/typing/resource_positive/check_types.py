@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import assert_type
 from uuid import uuid4
 
-from superjobs import HandlerCatalog, JobContext, SuperJobs
+from superjobs import HandlerCatalog, JobContext, NatsQueueConfig, SuperJobs
 from superjobs.resources import (
     AdmissionFencing,
     AdmissionOwner,
@@ -31,6 +31,14 @@ from superjobs_contract_example import (
 
 DEVICE_KEY = "sample-host.gpu0"
 _RESOURCES = {DEVICE_KEY: V1_EXCLUSIVE_CAPACITY}
+
+
+def _shared_resource_namespace_queue_config() -> None:
+    default = NatsQueueConfig()
+    assert_type(default.resource_namespace, str | None)
+    explicit = NatsQueueConfig(resource_namespace="physical_host")
+    assert_type(explicit.resource_namespace, str | None)
+    assert_type(explicit.resolved_resource_admission_namespace(), str)
 
 
 def _exclusive_requirement() -> None:

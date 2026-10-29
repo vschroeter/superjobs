@@ -1,0 +1,16 @@
+{
+  "worker_label": "a",
+  "interpreter_pid": 72252,
+  "launcher_exit": 0,
+  "interpreter_terminated": true,
+  "stderr_tail": "",
+  "termination": {
+    "launcher_pid": 72252,
+    "interpreter_pid": 72252,
+    "worker_id": "b96d7534f39f40638620ea605ef5801f",
+    "incarnation_id": "1",
+    "interpreter_terminated": true,
+    "launcher_exit": 0,
+    "mode": "graceful"
+  }
+}

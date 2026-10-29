@@ -1,0 +1,10 @@
+{
+  "mode": "source",
+  "suite": "resource_positive",
+  "pyright": "1.1.414",
+  "python_static": "3.12",
+  "venv": "C:\\Users\\schoc\\Documents\\Git\\Wildau\\NATS\\superjobs\\.venv",
+  "runtime_python": "3.13.5 (main, Jun 12 2025, 12:42:35) [MSC v.1943 64 bit (AMD64)]",
+  "runtime_executable": "C:\\Users\\schoc\\Documents\\Git\\Wildau\\NATS\\superjobs\\.venv\\Scripts\\python.exe",
+  "errors": []
+}
