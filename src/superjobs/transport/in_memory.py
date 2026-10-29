@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import defaultdict
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -30,7 +31,8 @@ from superjobs.transport.admission_record import (
 from superjobs.transport.delivery import Delivery
 from superjobs.resources.models import AdmissionOwner
 from superjobs.resources.admission import ResourceAdmission
-from superjobs.resources.errors import ResourceStaleOperationError
+from superjobs.resources.errors import ResourceStaleOperationError, WaitingExecutionUnavailableError
+from superjobs.resources.waiting_execution import build_waiting_execution_view
 
 
 class _InMemoryDelivery(Delivery):
@@ -963,3 +965,32 @@ class InMemoryTransport(JobBackend):
             current.progress = None
             execution.__dict__.update(current.__dict__)
             self._status_events[execution.job_id].set()
+
+    async def read_waiting_execution_view(
+        self,
+        *,
+        evaluated_at: datetime,
+        max_entries: int,
+        max_scan_keys: int,
+        scan_deadline_monotonic: float,
+    ):
+        if not self.started:
+            raise WaitingExecutionUnavailableError(
+                "Waiting-execution observation requires a started transport",
+            )
+        scan_truncated = len(self._executions) > max_scan_keys
+        records: list[ExecutionRecord] = []
+        for index, record in enumerate(self._executions.values()):
+            if index >= max_scan_keys:
+                break
+            if time.monotonic() >= scan_deadline_monotonic:
+                scan_truncated = True
+                break
+            records.append(record)
+        return build_waiting_execution_view(
+            evaluated_at=evaluated_at,
+            records=records,
+            max_entries=max_entries,
+            partial=False,
+            scan_truncated=scan_truncated,
+        )

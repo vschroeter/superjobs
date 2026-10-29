@@ -15,6 +15,8 @@ from superjobs.resources import (
     ResourceRequirement,
     TerminationConfirmation,
     V1_EXCLUSIVE_CAPACITY,
+    WaitingExecutionCompleteness,
+    WaitingExecutionView,
     WorkerIncarnation,
     parse_exclusive_resource_requirement,
 )
@@ -115,6 +117,15 @@ def _runtime_capacity_and_controller_surface() -> None:
     _ = jobs.resources
     assert_type(jobs.worker_incarnation, WorkerIncarnation)
     _runtime_decorators_and_register(jobs)
+
+
+def _waiting_execution_observation_types() -> None:
+    async def observe(jobs: SuperJobs) -> None:
+        view = await jobs.resources.waiting_executions(max_entries=10)
+        assert_type(view, WaitingExecutionView)
+        assert_type(view.completeness, WaitingExecutionCompleteness)
+
+    _ = observe
 
 
 def _context_cleanup_api(context: JobContext[ManifestEvent]) -> None:

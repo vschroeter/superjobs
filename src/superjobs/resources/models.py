@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from superjobs.resources.errors import ResourceValidationError
 from superjobs.resources.keys import validate_resource_key
+from superjobs.jobs.job_identity import JobIdentity
 
 V1_EXCLUSIVE_CAPACITY = 1
 V1_MAX_RESOURCE_REQUIREMENTS = 1
@@ -200,6 +201,42 @@ class AdmissionSnapshot(BaseModel):
     capacities: tuple[StoredCapacityRecord, ...]
     resources: tuple[StoredResourceRecord, ...]
     execution_claims: tuple[StoredExecutionClaim, ...]
+
+
+class WaitingExecutionCompleteness(StrEnum):
+    """Coverage of persisted ``waiting_for_resource`` records in a bounded scan.
+
+    Values describe how completely the scan observed matching completion records,
+    not whether every execution blocked on a resource appears in the view.
+    """
+
+    COMPLETE = "complete"
+    TRUNCATED = "truncated"
+    PARTIAL = "partial"
+
+
+class WaitingExecutionEntry(BaseModel):
+    """One Job execution observed in ``waiting_for_resource`` state."""
+
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    execution_id: str
+    job: JobIdentity
+    created_at: datetime | None = None
+
+
+class WaitingExecutionView(BaseModel):
+    """Bounded, read-only view of persisted resource-waiting completion records.
+
+    Scan limits do not imply constant peak memory on NATS (full KV key listing) or
+    in-memory transports (all execution records copied before truncation).
+    """
+
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    evaluated_at: datetime
+    completeness: WaitingExecutionCompleteness
+    entries: tuple[WaitingExecutionEntry, ...]
 
 
 class AcquisitionOutcome(StrEnum):
