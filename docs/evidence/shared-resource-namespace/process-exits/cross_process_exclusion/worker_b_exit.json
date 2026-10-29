@@ -1,13 +1,13 @@
 {
   "worker_label": "b",
-  "interpreter_pid": 76972,
+  "interpreter_pid": 68004,
   "launcher_exit": 0,
   "interpreter_terminated": true,
   "stderr_tail": "",
   "termination": {
-    "launcher_pid": 59820,
-    "interpreter_pid": 76972,
-    "worker_id": "768b26d99a2e4d1c91cb45cfb1daca31",
+    "launcher_pid": 68004,
+    "interpreter_pid": 68004,
+    "worker_id": "4c01e1358cd14d049ecb241a493e75b5",
     "incarnation_id": "1",
     "interpreter_terminated": true,
     "launcher_exit": 0,

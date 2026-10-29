@@ -10,8 +10,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from tools.worker_recovery_support.spawn_pid import marker_pid_in_spawn_tree
-
 
 class ProcessProofError(RuntimeError):
     """No trusted termination evidence is available for an owned test worker."""
@@ -66,11 +64,37 @@ def load_ready_marker(state_dir: Path, worker_label: str) -> ReadyMarker:
     return ready_marker_from_payload(json.loads(path.read_text(encoding="utf-8")))
 
 
+def native_interpreter_executable() -> str:
+    """Use the actual CPython binary, never the Windows venv redirector."""
+    executable = getattr(sys, "_base_executable", None) if sys.platform == "win32" else sys.executable
+    if not executable or not Path(executable).is_file():
+        raise ProcessProofError("native interpreter executable is unavailable")
+    return str(Path(executable).resolve())
+
+
+def _open_native_handle(pid: int):
+    if sys.platform == "win32":
+        from tools.worker_recovery_support.windows_process import OwnedWindowsProcess
+
+        return OwnedWindowsProcess(pid)
+    return None
+
+
 def register_owned_worker(process: subprocess.Popen[str], state_dir: Path, label: str) -> None:
-    """Capture the real interpreter before any stop/kill, including startup failure."""
+    """Retain native Popen ownership before reading any fallible startup marker.
+
+    spawn_worker uses the actual interpreter binary. Popen therefore already owns
+    its stable process handle, even if opening an additional Windows handle fails.
+    Registry identity is the retained Popen object, never a reusable numeric PID.
+    """
+    owned = _OWNED.setdefault(id(process), _OwnedSpawn(process, process.pid))
+    if owned.process is not process:
+        raise ProcessProofError("owned process identity changed")
     started = state_dir / f"worker_started_{label}.json"
     deadline = time.monotonic() + 10
     try:
+        if owned.handle is None:
+            owned.handle = _open_native_handle(owned.interpreter_pid)
         while time.monotonic() < deadline:
             if started.is_file():
                 try:
@@ -80,25 +104,24 @@ def register_owned_worker(process: subprocess.Popen[str], state_dir: Path, label
                     continue
                 if type(pid) is not int or pid <= 0:
                     raise ProcessProofError("invalid interpreter PID")
-                if not marker_pid_in_spawn_tree(process.pid, pid):
-                    raise ProcessProofError("interpreter is outside the owned spawn tree")
-                handle = None
-                if sys.platform == "win32":
-                    from tools.worker_recovery_support.windows_process import OwnedWindowsProcess
-
-                    handle = OwnedWindowsProcess(pid)
-                elif pid != process.pid:
-                    raise ProcessProofError("POSIX worker must be the directly owned child")
-                _OWNED[process.pid] = _OwnedSpawn(process, pid, handle)
+                if pid != owned.interpreter_pid:
+                    raise ProcessProofError("startup marker disagrees with the owned native interpreter")
                 return
             if process.poll() is not None:
                 raise ProcessProofError("worker exited before its startup identity was captured")
             time.sleep(.01)
         raise ProcessProofError("worker did not report its interpreter identity")
-    except BaseException:
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=5)
+    except BaseException as startup_error:
+        try:
+            finalize_owned_worker(
+                process, state_dir=state_dir, worker_label=label,
+                deadline=time.monotonic(), signal_stop=False, read_ready_marker=False,
+            )
+        except BaseException as cleanup_error:
+            raise BaseExceptionGroup(
+                "Worker startup failed and actual interpreter cleanup is unconfirmed",
+                [startup_error, cleanup_error],
+            ) from None
         raise
 
 
@@ -107,21 +130,34 @@ def _interpreter_exited(owned: _OwnedSpawn, deadline: float) -> bool:
         return True
     if owned.handle is not None:
         return owned.handle.exited(deadline=deadline)
-    return owned.process.poll() is not None
+    if owned.interpreter_pid != owned.process.pid:
+        raise ProcessProofError("actual interpreter handle is unavailable")
+    try:
+        owned.process.wait(timeout=max(0, deadline - time.monotonic()))
+        return True
+    except subprocess.TimeoutExpired:
+        return False
 
 
 def _terminate_interpreter(owned: _OwnedSpawn) -> None:
     if not _interpreter_exited(owned, time.monotonic()):
-        if owned.handle is not None:
-            owned.handle.terminate()
-        else:
-            owned.process.kill()
+        try:
+            if owned.handle is not None:
+                owned.handle.terminate()
+            else:
+                owned.process.kill()
+        except OSError:
+            # TerminateProcess can return access denied after a concurrent exit.
+            # Accept only an actual exit observed through the same held handle.
+            if not _interpreter_exited(owned, time.monotonic() + 5):
+                raise
 
 
 def finalize_owned_worker(
     process: subprocess.Popen[str], *, state_dir: Path, worker_label: str,
     deadline: float, marker: ReadyMarker | None = None, hard: bool = False,
     signal_stop: bool = True, evidence_dir: Path | None = None,
+    read_ready_marker: bool = True,
 ) -> TerminationEvidence | None:
     """Confirm both actual interpreter and launcher exit before returning evidence.
 
@@ -129,10 +165,10 @@ def finalize_owned_worker(
     forced termination. PID reuse and disappearance of a launcher are not proofs.
     These dummy test interpreters do not launch resource-consuming descendants.
     """
-    owned = _OWNED.get(process.pid)
+    owned = _OWNED.get(id(process))
     if owned is None or owned.process is not process:
         raise ProcessProofError("process was not registered as this test's owned child")
-    if marker is None:
+    if marker is None and read_ready_marker:
         try:
             marker = load_ready_marker(state_dir, worker_label)
         except ProcessProofError:

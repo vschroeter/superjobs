@@ -30,6 +30,34 @@ process-proof and previously failing helper-import suite passed **39 tests in
 matching and installed-wheel origin/runtime verification all passed again; current
 resource API and runtime records are in `typing-after-relocation/`.
 
+## Startup and exit-proof correction
+
+Independent Standards and Spec reviews of `0c5267b` both identified the same P2:
+registration failure could kill only the Windows launcher before retaining the
+actual interpreter. An owned idle-child reproducer observed launcher exit while
+the interpreter was momentarily still alive and the registry/audit were empty.
+No reproducer remains running. The Ubuntu CI artifact independently exposed a
+POSIX race: after SIGKILL, exit proof ignored its deadline and immediately polled
+instead of waiting for the actual child to exit.
+
+The dummy-worker spawner now starts the actual CPython binary (avoiding the
+Windows venv redirector) and preserves the parent's dependency paths in its
+stdlib bootstrap. Native Popen ownership is retained before marker or extra
+handle acquisition can fail. Registry identity is the retained process object;
+startup marker PIDs cannot select another process. Startup failures reap the
+same owned interpreter. POSIX proof honors its deadline with `Popen.wait()`.
+A failed Windows terminate call is accepted only when the same held handle proves
+concurrent exit. Unproved exit remains registered and never yields recovery proof.
+
+Current targeted proof: **48 passed in 9.46 s**, including actual native-child
+marker/foreign-marker/handle/timeout failures, a deliberately exited launcher with
+a still-living captured interpreter, and the missing-handle case staying visibly
+unconfirmed until the test's independent pre-held backup handle proves cleanup.
+Full isolated fast gate: **1015 passed, 2 skipped, 84 deselected**, stage 155.2 s,
+exit 0, no cleanup errors. Logs: `pytest-lifecycle-correction.txt` and
+`fast-after-lifecycle-correction/run-summary.json`. The new head's hosted Linux
+and Windows integration matrices still need their own successful result.
+
 ## Initial measured verification
 
 - Final focused/configuration/process-proof and existing admission/fencing suite:
@@ -80,8 +108,10 @@ late release must return **STALE** and leave B's owner/fence/claim unchanged.
 actively owns the resource would weaken the proof and is not allowed here.
 
 Windows interpreter identity is reported by a stdlib bootstrap before importing
-worker dependencies. Its owned spawn tree is checked, and the actual interpreter
-process handle is opened before any graceful stop or kill. Recovery evidence is
+worker dependencies. The actual native interpreter is directly spawned; its
+Popen handle is retained immediately, then an additional actual-interpreter handle
+is opened before any graceful stop or kill. The startup marker must match that
+already owned interpreter. Recovery evidence is
 returned only after that handle proves interpreter exit and the launcher is
 reaped. Per-case exit JSON preserves both PIDs and exact worker incarnation.
 No global process scan grants ownership or recovery. Failure to prove exit keeps

@@ -27,6 +27,7 @@ from superjobs.resources.models import (
 from superjobs.transport.implementations.nats import NatsQueueConfig
 
 from tests.support.shared_resource_namespace.constants import RESOURCE_KEY
+from tests.support.shared_resource_namespace.process_proof import native_interpreter_executable
 from tests.support.shared_resource_namespace.queue_config import (
     control_subject,
     queue_config_for_work_prefix,
@@ -41,6 +42,7 @@ def child_env(*, nats_url: str, extra: dict[str, str] | None = None) -> dict[str
     env.pop("NATS_URL", None)
     env["NATS_URL"] = nats_url
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["SJ_PARENT_SYS_PATH"] = json.dumps([path for path in sys.path if path])
     src = REPO_ROOT / "src"
     existing = env.get("PYTHONPATH", "")
     prefix = os.pathsep.join((str(src), str(REPO_ROOT)))
@@ -70,7 +72,7 @@ def spawn_worker(
         },
     )
     process = subprocess.Popen(
-        [sys.executable, str(WORKER_ENTRY.with_name("worker_bootstrap.py")), str(WORKER_ENTRY)],
+        [native_interpreter_executable(), str(WORKER_ENTRY.with_name("worker_bootstrap.py")), str(WORKER_ENTRY)],
         cwd=str(WORKER_ENTRY.parent),
         env=env,
         stdout=subprocess.DEVNULL,

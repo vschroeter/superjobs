@@ -1,24 +1,24 @@
 {
-  "work_prefix_a": "work_a_67f2b263290f",
-  "work_prefix_b": "work_b_67f2b263290f",
+  "work_prefix_a": "work_a_94e722638c78",
+  "work_prefix_b": "work_b_94e722638c78",
   "resource_namespace": "physical_host",
   "actual_shared_admission_bucket": "physical_host-resource-admission",
   "physical_cpu_key": "samplegen/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/cpu/c4fc787d1d3b4cac81eaa0b90f0845011a0d0fced368b92dd2d9eec55ff50dfc",
   "owner_a": {
     "resource_key": "samplegen/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/cpu/c4fc787d1d3b4cac81eaa0b90f0845011a0d0fced368b92dd2d9eec55ff50dfc",
     "incarnation": {
-      "worker_id": "78fa7d71af984b36bde9ca87270ef0bd",
+      "worker_id": "e6d198a0dad747a391cea035f698dd7f",
       "incarnation_id": "1"
     },
-    "invocation_id": "f07994e4-7d31-4bda-996c-b32d71209862",
-    "execution_id": "ddea7820-a182-4c7d-877f-af2b89f7a371",
+    "invocation_id": "616ac4de-47d7-485e-a3a5-945618001823",
+    "execution_id": "a8b4f81c-a31f-405d-91f6-09b14dced4d6",
     "fencing": {
       "generation": 1,
-      "token": "e10b789e-f850-42c2-86e3-8738e872da82"
+      "token": "2cbb2218-acc7-4cc3-82d1-83ef568975e1"
     }
   },
-  "worker_a_pid": 56888,
-  "worker_b_pid": 76972,
+  "worker_a_pid": 105104,
+  "worker_b_pid": 68004,
   "result_a": "a",
   "result_b": "b",
   "final_owner_count": 0,
