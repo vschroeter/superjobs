@@ -49,12 +49,19 @@ same owned interpreter. POSIX proof honors its deadline with `Popen.wait()`.
 A failed Windows terminate call is accepted only when the same held handle proves
 concurrent exit. Unproved exit remains registered and never yields recovery proof.
 
-Current targeted proof: **48 passed in 9.46 s**, including actual native-child
+Current targeted proof: **48 passed in 9.47 s**, including actual native-child
 marker/foreign-marker/handle/timeout failures, a deliberately exited launcher with
 a still-living captured interpreter, and the missing-handle case staying visibly
 unconfirmed until the test's independent pre-held backup handle proves cleanup.
-Full isolated fast gate: **1015 passed, 2 skipped, 84 deselected**, stage 155.2 s,
-exit 0, no cleanup errors. Logs: `pytest-lifecycle-correction.txt` and
+A follow-up Standards review identified a setup-only version of the same leak in
+that adversarial test's nested child/marker handoff. The fixture now directly
+owns both native processes from creation and holds their Popen handles before
+all additional handle/marker setup. It models the captured split-process state
+without an unowned descendant or fallible identity handoff.
+
+Final full isolated fast gate: **1015 passed, 2 skipped, 84 deselected**, stage
+154.5 s, exit 0, no cleanup errors; `fast-after-fixture-correction/run-summary.json`.
+The preceding lifecycle pass also had **1015 passed**, stage 155.2 s. Logs: `pytest-lifecycle-correction.txt` and
 `fast-after-lifecycle-correction/run-summary.json`. The new head's hosted Linux
 and Windows integration matrices still need their own successful result.
 
