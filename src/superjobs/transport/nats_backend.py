@@ -307,7 +307,7 @@ class NatsJobBackend(JobBackend):
         self._resource_jobs: set[str] = set()
         self.resource_admission_store = NatsResourceAdmissionStore(
             broker,
-            subject_prefix=self.queue_config.subject_prefix,
+            subject_prefix=self.queue_config.resolved_resource_admission_namespace(),
         )
 
     def register_resource_job(self, identity: JobIdentity) -> None:

@@ -156,8 +156,9 @@ workers/controllers, and reconcile existing ownership before removing guards.
 Every consumer of a resource-bound Job must follow the same admission policy;
 older workers do not acquire these reservations. Keep claims in execution
 provenance outside frozen generation inputs. Offline probes need the same NATS
-namespace. Verify the mixed Windows-controller/Linux-worker application and
-supervisor lifecycle before removing its filesystem guards.
+account/domain and resource-admission namespace. Verify the mixed
+Windows-controller/Linux-worker application and supervisor lifecycle before
+removing its filesystem guards.
 
 ## Related checks
 
@@ -166,3 +167,58 @@ supervisor lifecycle before removing its filesystem guards.
 | [development.md](development.md) | Contract typing and `dev_check` commands |
 | [verification.md](verification.md) | Dated measured results |
 | `tools/verify_resource_admission.py` | Cross-process admission scenarios; required in `dev_check integration` / `full` |
+
+## Shared resource-admission namespace (optional)
+
+Work transport settings (`NatsQueueConfig.subject_prefix`, streams, completion/idempotency
+buckets, worker discovery subjects) can differ per application queue while **resource
+admission** KV state is shared when every participant uses the same broker account,
+JetStream domain, **`resource_namespace`**, and **resource key**. Matching resource keys
+alone is insufficient when admission buckets still derive from different work prefixes.
+
+```python
+from superjobs import NatsQueueConfig
+
+work_a = NatsQueueConfig(
+    stream="work_a_stream",
+    observation_stream="work_a_observations",
+    subject_prefix="work_a",
+    completion_bucket="work_a_completions",
+    idempotency_bucket="work_a_idempotency",
+    resource_namespace="physical_host",
+)
+
+work_b = NatsQueueConfig(
+    stream="work_b_stream",
+    observation_stream="work_b_observations",
+    subject_prefix="work_b",
+    completion_bucket="work_b_completions",
+    idempotency_bucket="work_b_idempotency",
+    resource_namespace="physical_host",
+)
+```
+
+Omit `resource_namespace` (default `None`) to keep the previous behavior: admission
+storage derives from each queue's `subject_prefix`. Explicit values must match a
+fail-closed token grammar (dot-separated `[A-Za-z0-9_-]` segments; no wildcards,
+whitespace, or silent normalization).
+
+Cross-queue controllers can call `jobs.resources.snapshot()` and
+`resolve_terminated_incarnation()` against the shared bucket even when their work
+prefix differs. Removing a diagnostic work queue must not delete the shared admission
+KV bucket or reset its fencing/revocation history. Admission records remain without
+TTL; uncertainty never releases ownership based on presence expiry or disconnect alone.
+Custom execution IDs must also be unique across the shared admission namespace;
+otherwise its execution claims conservatively prevent overlapping invocations.
+
+### Samplegen (external integration)
+
+Samplegen currently has fixed transport/broker-check defaults, a probe using the
+`superjobs` admission namespace, and a storage-based physical host identity. A
+separately verified diagnostic adapter must consistently supply private work
+settings, an explicitly shared resource namespace, and the existing host identity.
+Its `serve_worker(..., runtime_factory=...)` and `Orchestrator(..., jobs,
+broker_check=...)` seams permit programmatic integration without renaming engine
+Jobs. No existing Samplegen CLI namespace override is implied by this library
+change. Keep diagnostic databases/output private, models read-only, and termination
+confirmation restricted to the supervisor's own verified child incarnation.
