@@ -1,0 +1,424 @@
+{
+  "checker_version": "1.1.414",
+  "source_verifier_exit": 0,
+  "wheel_verifier_exit": 0,
+  "combined_source_wheel_comparison_run": false,
+  "suites": [
+    {
+      "mode": "source",
+      "suite": "catalog_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 9,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.718
+      },
+      "raw_sha256": "1e24b38969fad830e39264349bc45016ddcdf1370020f9f948e886f3671dc7d1"
+    },
+    {
+      "mode": "source",
+      "suite": "catalog_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.519
+      },
+      "raw_sha256": "d8035fc595f655c9e493305ce5630d3e8b81d506d902bcf5dfde5e655959d13e"
+    },
+    {
+      "mode": "source",
+      "suite": "cli_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 27,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.465
+      },
+      "raw_sha256": "347c67091c2341554ac00e21fea5acf8ffc5e1724201f85d1cd2bdbfa17bdeb8"
+    },
+    {
+      "mode": "source",
+      "suite": "cli_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 7,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.831
+      },
+      "raw_sha256": "5f488c5ae73deb0f695f7aa95866aa081ddc2214bc2b900965a9a21502a298b7"
+    },
+    {
+      "mode": "source",
+      "suite": "discovery_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 9,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.959
+      },
+      "raw_sha256": "2375c27f559452021631c5b0438f2128365e5cc503806795267eedaf20904718"
+    },
+    {
+      "mode": "source",
+      "suite": "discovery_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 1.289
+      },
+      "raw_sha256": "83c45cfcc0fd4dff2ef81cab3eae78619dd631454ca06833495ce7788fbccd4b"
+    },
+    {
+      "mode": "source",
+      "suite": "negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 46,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.516
+      },
+      "raw_sha256": "0ef610b168704505af448042645617b44baa615184cc3acda18aec4ac38be65c"
+    },
+    {
+      "mode": "source",
+      "suite": "positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 3,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.8
+      },
+      "raw_sha256": "425ff9a77ae8a51b8fdfbe93a86d1efc89bcda06fab7528e457130f59f36aed0"
+    },
+    {
+      "mode": "source",
+      "suite": "producer_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 17,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.769
+      },
+      "raw_sha256": "6af23213031197014c05477c9f1b001c4835d1a0d76c32de8f44012d55f4e099"
+    },
+    {
+      "mode": "source",
+      "suite": "producer_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.759
+      },
+      "raw_sha256": "4c2c554c2280f459f589cbae6316443a5640e2b0c6e33ecdc05e74ae434ad942"
+    },
+    {
+      "mode": "source",
+      "suite": "resource_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 12,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.836
+      },
+      "raw_sha256": "b2a83655c3a93955f15df6ccdf468b8e53a2a9010d560efeddd3b3112f2b13e9"
+    },
+    {
+      "mode": "source",
+      "suite": "resource_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.996
+      },
+      "raw_sha256": "cac50dc1884a5d0163906ad31120c5edb6eeba7de3a5138f914fc1830bded048"
+    },
+    {
+      "mode": "source",
+      "suite": "strict_payload_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 1,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.203
+      },
+      "raw_sha256": "8b1ac3d11b82e85988ec2974f6a3330c8d047fcea054c625bb224fd39ff8cab3"
+    },
+    {
+      "mode": "source",
+      "suite": "strict_payload_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.211
+      },
+      "raw_sha256": "5af310a9dad0590bca0f29246e8be963955758d10fa1e63f30cdac972a4ed7ee"
+    },
+    {
+      "mode": "source",
+      "suite": "worker_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 30,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.706
+      },
+      "raw_sha256": "5d90e6ce91cdcdf13c9adff70c095a6836c8a7a92a958d62ccabcccd7bbd94c5"
+    },
+    {
+      "mode": "source",
+      "suite": "worker_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.644
+      },
+      "raw_sha256": "8c17fb27b27f37be003333db567abb73c29fb4364098636c5ec8c81485e5996b"
+    },
+    {
+      "mode": "wheel",
+      "suite": "catalog_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 9,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.387
+      },
+      "raw_sha256": "dc20fe1d347db2bfd41b66529911d1da122105bd38ba186dec7a6438e865430f"
+    },
+    {
+      "mode": "wheel",
+      "suite": "catalog_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.448
+      },
+      "raw_sha256": "e94441dcf79816d023d8778784d916a159940d8e315d89706a5dd5bea5cd2883"
+    },
+    {
+      "mode": "wheel",
+      "suite": "cli_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 27,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.444
+      },
+      "raw_sha256": "96ea94aa8452115775e18b535908ff9e15d7f53dd7857129ab99f84d060c8854"
+    },
+    {
+      "mode": "wheel",
+      "suite": "cli_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 7,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.719
+      },
+      "raw_sha256": "b6ea41ace9a3947431ebaab3f0e01b69aa6f7bbd00bfb7283557bae5bb63468a"
+    },
+    {
+      "mode": "wheel",
+      "suite": "discovery_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 9,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.753
+      },
+      "raw_sha256": "88e1a05fc8cb614696ed11858e9f28221279f6843ff0eb6b7e5c100599b4de44"
+    },
+    {
+      "mode": "wheel",
+      "suite": "discovery_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.77
+      },
+      "raw_sha256": "d54a04f5d98dbf88ff123797c2a73f9e5d245ca28649df88d254146ec28b7465"
+    },
+    {
+      "mode": "wheel",
+      "suite": "negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 46,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.453
+      },
+      "raw_sha256": "ec09ae9f6bc5ae9a5898833fbd836e708ea9940726da7e1e7824f4f1d5d39906"
+    },
+    {
+      "mode": "wheel",
+      "suite": "positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 3,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.711
+      },
+      "raw_sha256": "1f117f3bccf6ea28c0f4e81187a5ffe09a2e8bc498f1dbd81fdce6ac9ff75b22"
+    },
+    {
+      "mode": "wheel",
+      "suite": "producer_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 17,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.738
+      },
+      "raw_sha256": "48d0149d4f728fcccfc7a50f2591f05d13500a494616bb73539bd978ecb4cf15"
+    },
+    {
+      "mode": "wheel",
+      "suite": "producer_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.663
+      },
+      "raw_sha256": "d0c86886ec07ce5c6053bc6e1498cecd43255685c49f8a35d6ee9dc2109b7163"
+    },
+    {
+      "mode": "wheel",
+      "suite": "resource_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 12,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.725
+      },
+      "raw_sha256": "4b0ffda8c8ed7f545642554e22cd844771d4cde3bb1cd9238b96e96461eef76f"
+    },
+    {
+      "mode": "wheel",
+      "suite": "resource_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.801
+      },
+      "raw_sha256": "8a143fb3fc8d4bbba28d063d2ba4da0dc6b7bea59408efab4597ebf07d369abb"
+    },
+    {
+      "mode": "wheel",
+      "suite": "strict_payload_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 1,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.193
+      },
+      "raw_sha256": "c312924cfe37d02a3f2646101b9e027ea437bff23961be0205a3e24af08d6f30"
+    },
+    {
+      "mode": "wheel",
+      "suite": "strict_payload_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.197
+      },
+      "raw_sha256": "0367d8f2b281488c4d0ede3b99885a92bbc847623ca19dea487e01988ff57536"
+    },
+    {
+      "mode": "wheel",
+      "suite": "worker_negative",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 30,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.558
+      },
+      "raw_sha256": "851f052a74514f9f4d976656b0e53d7140d5d85e124891f2f7c185e4aec6c1a4"
+    },
+    {
+      "mode": "wheel",
+      "suite": "worker_positive",
+      "checker_version": "1.1.414",
+      "diagnostic_summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 0,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.576
+      },
+      "raw_sha256": "4648625266b15dbc95d7c1b7c59d6488f3fa6480e31214ee9e6d459253062a87"
+    }
+  ]
+}

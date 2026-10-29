@@ -1,0 +1,13 @@
+# Retain only independent final evidence, not obsolete Composer proof files.
+/pytest-results.txt
+/verify-contract-typing-source.log
+/process-exits/worker_*_exit.json
+# Keep verbose ruled negative diagnostics locally; summary retains counts/hashes.
+/typing-independent/*
+!/typing-independent/resource_positive-source-meta.json
+!/typing-independent/resource_positive-source-pyright.json
+/typing-wheel-independent/*
+!/typing-wheel-independent/resource_positive-wheel-meta.json
+!/typing-wheel-independent/resource_positive-wheel-pyright.json
+!/typing-wheel-independent/py313-origin.json
+!/typing-wheel-independent/py313-runtime.json

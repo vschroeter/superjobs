@@ -1,0 +1,16 @@
+{
+  "worker_label": "a",
+  "interpreter_pid": 72984,
+  "launcher_exit": 1,
+  "interpreter_terminated": true,
+  "stderr_tail": "",
+  "termination": {
+    "launcher_pid": 106512,
+    "interpreter_pid": 72984,
+    "worker_id": "49300bfaea124315ab2120caf6129d47",
+    "incarnation_id": "1",
+    "interpreter_terminated": true,
+    "launcher_exit": 1,
+    "mode": "hard_kill"
+  }
+}
