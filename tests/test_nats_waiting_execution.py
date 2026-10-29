@@ -235,14 +235,16 @@ async def test_nats_writer_gone_same_attempt_marks_partial(
     import sys
 
     from superjobs.resources import WaitingExecutionEvidence
+    from tests.support.shared_resource_namespace.process_proof import native_interpreter_executable
 
     worker_script = tmp_path / "writer_gone_worker.py"
     ready = tmp_path / "ready"
     entered = tmp_path / "entered"
     worker_script.write_text(
         '''
-import asyncio, json, os
+import asyncio, json, os, sys
 from pathlib import Path
+sys.path[:0] = json.loads(os.environ["PARENT_SYS_PATH"])
 from faststream.nats import NatsBroker
 from superjobs import HandlerCatalog, NoRequestJob, SuperJobs
 from superjobs.transport.implementations.nats import NatsQueueConfig
@@ -263,7 +265,10 @@ async def main():
         queue_config=NatsQueueConfig(**json.loads(os.environ["QUEUE"])),
         handlers=catalog, resource_capacities={"device.gpu0": 1}, discovery=False)
     await jobs.start()
-    Path(os.environ["READY"]).write_text("ready")
+    ready = Path(os.environ["READY"])
+    ready_tmp = ready.with_suffix(".tmp")
+    ready_tmp.write_text(json.dumps({"pid": os.getpid()}))
+    ready_tmp.replace(ready)
     try:
         await asyncio.Event().wait()
     finally:
@@ -288,15 +293,18 @@ asyncio.run(main())
         QUEUE=json.dumps(queue),
         READY=str(ready),
         ENTERED=str(entered),
+        PARENT_SYS_PATH=json.dumps([path for path in sys.path if path]),
     )
-    worker = await asyncio.create_subprocess_exec(sys.executable, str(worker_script), env=env)
     runtime = SuperJobs(
         broker=nats_broker_factory(),
         queue_config=nats_queue_config,
         discovery=False,
     )
-    await runtime.start()
+    worker = await asyncio.create_subprocess_exec(
+        native_interpreter_executable(), str(worker_script), env=env,
+    )
     try:
+        await runtime.start()
         for _ in range(100):
             if ready.exists():
                 break
@@ -304,6 +312,7 @@ asyncio.run(main())
                 pytest.fail(f"worker exited early: {worker.returncode}")
             await asyncio.sleep(0.05)
         assert ready.exists()
+        assert json.loads(ready.read_text())["pid"] == worker.pid
         await runtime.client(job_a).submit()
         for _ in range(100):
             if entered.exists():
@@ -320,6 +329,7 @@ asyncio.run(main())
         assert view is not None
         worker.terminate()
         await asyncio.wait_for(worker.wait(), timeout=5)
+        assert worker.returncode is not None
         record = await runtime.transport.get_execution(job_b.identity, second.id)
         assert record is not None
         assert record.state is JobState.WAITING_FOR_RESOURCE
@@ -329,10 +339,13 @@ asyncio.run(main())
         assert after_kill.entries[0].evidence is WaitingExecutionEvidence.PERSISTED_HISTORICAL
         assert after_kill.completeness is WaitingExecutionCompleteness.PARTIAL
     finally:
-        await runtime.stop(graceful=False)
-        if worker.returncode is None:
-            worker.terminate()
-        await asyncio.wait_for(worker.wait(), timeout=5)
+        try:
+            if worker.returncode is None:
+                worker.kill()
+            await asyncio.wait_for(worker.wait(), timeout=5)
+            assert worker.returncode is not None
+        finally:
+            await runtime.stop(graceful=False)
 
 
 @pytest.mark.asyncio
