@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from superjobs.resources.errors import ResourceValidationError
 from superjobs.resources.keys import validate_resource_key
+from superjobs.jobs.execution import JobState
 from superjobs.jobs.job_identity import JobIdentity
 
 V1_EXCLUSIVE_CAPACITY = 1
@@ -203,11 +204,24 @@ class AdmissionSnapshot(BaseModel):
     execution_claims: tuple[StoredExecutionClaim, ...]
 
 
-class WaitingExecutionCompleteness(StrEnum):
-    """Coverage of persisted ``waiting_for_resource`` records in a bounded scan.
+class WaitingExecutionEvidence(StrEnum):
+    """Strength of completion-record evidence for resource blocking.
 
-    Values describe how completely the scan observed matching completion records,
-    not whether every execution blocked on a resource appears in the view.
+    Observation lists ``PERSISTED_HISTORICAL`` entries only: durable
+    ``waiting_for_resource`` completion records that carry a requested resource
+    key. A matching attempt or invocation pin does not prove the writing worker
+    is still alive; redelivery can reuse the same attempt later.
+    """
+
+    PERSISTED_HISTORICAL = "persisted_historical"
+
+
+class WaitingExecutionCompleteness(StrEnum):
+    """Coverage of completion records in a bounded scan.
+
+    Values describe scan bounds and whether unverified ``waiting_for_resource``
+    or ``pending`` records were present. They do not prove which executions are
+    actively blocked on a resource right now.
     """
 
     COMPLETE = "complete"
@@ -216,20 +230,36 @@ class WaitingExecutionCompleteness(StrEnum):
 
 
 class WaitingExecutionEntry(BaseModel):
-    """One Job execution observed in ``waiting_for_resource`` state."""
+    """One persisted waiting-for-resource record observed in completion storage."""
 
     model_config = ConfigDict(frozen=True, strict=True)
 
     execution_id: str
     job: JobIdentity
+    resource_key: str
+    evidence: WaitingExecutionEvidence = WaitingExecutionEvidence.PERSISTED_HISTORICAL
+    waiting_invocation_id: UUID | None = None
+    record_state: JobState
     created_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _validate_record_state(self) -> Self:
+        if self.record_state is not JobState.WAITING_FOR_RESOURCE:
+            raise ValueError(
+                "waiting-execution entries require waiting_for_resource state",
+            )
+        validate_resource_key(self.resource_key)
+        return self
 
 
 class WaitingExecutionView(BaseModel):
-    """Bounded, read-only view of persisted resource-waiting completion records.
+    """Bounded, read-only view of resource-blocked completion records.
 
-    Scan limits do not imply constant peak memory on NATS (full KV key listing) or
-    in-memory transports (all execution records copied before truncation).
+    ``evaluated_at`` marks when the scan started; stored evidence may be older;
+    entries may already have moved or disappeared by the time callers read the
+    view. Scan limits do not imply
+    constant peak memory on NATS (bounded ``watchall`` snapshots) or in-memory
+    transports (execution walks capped by ``max_scan_keys``).
     """
 
     model_config = ConfigDict(frozen=True, strict=True)

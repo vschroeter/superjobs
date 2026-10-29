@@ -256,6 +256,8 @@ async def _process_invocation(
                     item.execution,
                     item.attempt,
                     target_state=JobState.WAITING_FOR_RESOURCE,
+                    waiting_resource_key=config.requirement.resource_key,
+                    waiting_resource_invocation_id=intent.invocation_id,
                 ),
                 config,
             )

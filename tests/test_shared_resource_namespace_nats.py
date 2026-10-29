@@ -11,7 +11,12 @@ import pytest
 
 from superjobs import HandlerCatalog, JobState, JobSucceeded, SuperJobs
 from superjobs.jobs.execution import JobFailedOutcome
-from superjobs.resources import ReleaseOutcome, TerminationConfirmation, WaitingExecutionCompleteness
+from superjobs.resources import (
+    ReleaseOutcome,
+    TerminationConfirmation,
+    WaitingExecutionCompleteness,
+    WaitingExecutionEvidence,
+)
 from superjobs.resources.models import ResourceAvailability
 from tests.support.shared_resource_namespace.constants import HOLD_JOB, RESOURCE_KEY
 from tests.support.shared_resource_namespace.orchestration import (
@@ -196,9 +201,11 @@ async def test_shared_resource_namespace_cross_process_exclusion(
         waiting_a = await observer_a.resources.waiting_executions()
         waiting_b = await observer_b.resources.waiting_executions()
         assert waiting_a.completeness is WaitingExecutionCompleteness.COMPLETE
-        assert waiting_b.completeness is WaitingExecutionCompleteness.COMPLETE
+        assert waiting_b.completeness is WaitingExecutionCompleteness.PARTIAL
         assert waiting_a.entries == ()
         assert {entry.execution_id for entry in waiting_b.entries} == {handle_b.id}
+        assert waiting_b.entries[0].resource_key == RESOURCE_KEY
+        assert waiting_b.entries[0].evidence is WaitingExecutionEvidence.PERSISTED_HISTORICAL
 
         await publish_release(nats_url, config_a, handle_a.id)
         outcome_a = await asyncio.wait_for(handle_a.outcome(), timeout=15.0)

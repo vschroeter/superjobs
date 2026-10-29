@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import assert_type
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from superjobs import HandlerCatalog, JobContext, NatsQueueConfig, SuperJobs
+from superjobs.jobs.execution import JobState
 from superjobs.resources import (
     AdmissionFencing,
     AdmissionOwner,
@@ -16,9 +17,12 @@ from superjobs.resources import (
     TerminationConfirmation,
     V1_EXCLUSIVE_CAPACITY,
     WaitingExecutionCompleteness,
+    WaitingExecutionEntry,
+    WaitingExecutionEvidence,
     WaitingExecutionView,
     WorkerIncarnation,
     parse_exclusive_resource_requirement,
+    read_waiting_executions_from_broker,
 )
 from superjobs_contract_example import (
     HEARTBEAT_JOB,
@@ -132,6 +136,24 @@ def _waiting_execution_observation_types() -> None:
         view = await jobs.resources.waiting_executions(max_entries=10)
         assert_type(view, WaitingExecutionView)
         assert_type(view.completeness, WaitingExecutionCompleteness)
+        if view.entries:
+            entry = view.entries[0]
+            assert_type(entry, WaitingExecutionEntry)
+            assert_type(entry.resource_key, str)
+            assert_type(entry.record_state, JobState)
+            assert_type(entry.evidence, WaitingExecutionEvidence)
+            assert_type(entry.waiting_invocation_id, UUID | None)
+
+    _ = observe
+
+
+def _fresh_broker_waiting_observation_types(broker: object, queue_config: object) -> None:
+    async def observe() -> None:
+        view = await read_waiting_executions_from_broker(
+            broker,  # type: ignore[arg-type]
+            queue_config=queue_config,  # type: ignore[arg-type]
+        )
+        assert_type(view, WaitingExecutionView)
 
     _ = observe
 

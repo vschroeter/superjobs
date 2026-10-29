@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, Callable
+from uuid import UUID
 
 from superjobs.exceptions.jobs import (
     IdempotencyConflictError,
@@ -29,10 +30,16 @@ from superjobs.transport.admission_record import (
     admission_owners_match,
 )
 from superjobs.transport.delivery import Delivery
+from superjobs.resources.keys import validate_resource_key
 from superjobs.resources.models import AdmissionOwner
 from superjobs.resources.admission import ResourceAdmission
 from superjobs.resources.errors import ResourceStaleOperationError, WaitingExecutionUnavailableError
-from superjobs.resources.waiting_execution import build_waiting_execution_view
+from superjobs.resources.waiting_execution import (
+    build_waiting_execution_view,
+    clear_waiting_resource_publication,
+    record_matches_waiting_observation,
+    waiting_pin_blocks_new_publication,
+)
 
 
 class _InMemoryDelivery(Delivery):
@@ -842,6 +849,8 @@ class InMemoryTransport(JobBackend):
         expected_admission_owner: AdmissionOwner | None = None,
         target_state: JobState = JobState.RUNNING,
         admission_owner: AdmissionOwner | None = None,
+        waiting_resource_key: str | None = None,
+        waiting_resource_invocation_id: UUID | None = None,
     ) -> None:
         terminal_event = None
         async with self._execution_locks[execution.job_id]:
@@ -897,10 +906,36 @@ class InMemoryTransport(JobBackend):
                 )
                 terminal_event = JobFailed(error=current.error)
             else:
+                if target_state is JobState.WAITING_FOR_RESOURCE:
+                    if waiting_pin_blocks_new_publication(
+                        current,
+                        attempt=attempt,
+                        waiting_resource_invocation_id=waiting_resource_invocation_id,
+                    ):
+                        execution.__dict__.update(current.__dict__)
+                        return
+                    if (
+                        current.waiting_resource_invocation_id is not None
+                        and waiting_resource_invocation_id is not None
+                        and current.waiting_resource_invocation_id
+                        != waiting_resource_invocation_id
+                    ):
+                        clear_waiting_resource_publication(current)
                 current.state = target_state
                 current.attempt = attempt
                 if target_state is JobState.RUNNING:
                     current.started_at = current.started_at or datetime.now(UTC)
+                    clear_waiting_resource_publication(current)
+                elif target_state is JobState.WAITING_FOR_RESOURCE:
+                    if waiting_resource_invocation_id is not None:
+                        current.waiting_resource_invocation_id = (
+                            waiting_resource_invocation_id
+                        )
+                    if waiting_resource_key is not None:
+                        current.waiting_resource_key = validate_resource_key(
+                            waiting_resource_key,
+                        )
+                    current.waiting_resource_attempt = attempt
                 current.next_attempt_at = None
             execution.__dict__.update(current.__dict__)
             self._status_events[execution.job_id].set()
@@ -963,6 +998,7 @@ class InMemoryTransport(JobBackend):
                 current.state = JobState.PENDING
                 current.next_attempt_at = next_attempt_at
             current.progress = None
+            clear_waiting_resource_publication(current)
             execution.__dict__.update(current.__dict__)
             self._status_events[execution.job_id].set()
 
@@ -980,17 +1016,27 @@ class InMemoryTransport(JobBackend):
             )
         scan_truncated = len(self._executions) > max_scan_keys
         records: list[ExecutionRecord] = []
+        legacy_waiting_without_key = False
+        unverified_liveness = False
         for index, record in enumerate(self._executions.values()):
             if index >= max_scan_keys:
                 break
             if time.monotonic() >= scan_deadline_monotonic:
                 scan_truncated = True
                 break
-            records.append(record)
+            if record.state in {JobState.WAITING_FOR_RESOURCE, JobState.PENDING}:
+                unverified_liveness = True
+            if record.state is JobState.WAITING_FOR_RESOURCE and record.waiting_resource_key is None:
+                legacy_waiting_without_key = True
+                continue
+            if record_matches_waiting_observation(record):
+                records.append(record)
         return build_waiting_execution_view(
             evaluated_at=evaluated_at,
             records=records,
             max_entries=max_entries,
             partial=False,
             scan_truncated=scan_truncated,
+            legacy_waiting_without_key=legacy_waiting_without_key,
+            unverified_liveness=unverified_liveness,
         )
