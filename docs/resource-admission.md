@@ -22,6 +22,7 @@ boolean.
 | Physical checks | No generic GPU/OS memory or process verification; only durable ownership and application cleanup/termination paths. |
 | Snapshots | `jobs.resources.snapshot()` is diagnostic; records are not TTL-trimmed into automatic release. |
 | Waiting | `JobState.WAITING_FOR_RESOURCE` (`waiting_for_resource`); waiting does not spend an inference retry merely because another worker holds the device. |
+| Waiting observation | `jobs.resources.waiting_executions()` requires a started transport (normal `start()` may provision JetStream buckets); it does not inspect a fresh broker without that provisioning path. The call scans durable completion records for `waiting_for_resource` only— not `pending` deliveries, not admission claims alone, and not executions before admission is stored on the record. `WaitingExecutionCompleteness` is coverage of matching records within bounded time/key limits, not every execution actually blocked on a resource; views may be truncated, partial, or stale under broker races. The read path is observation-only (no admission writes or completion KV puts). NATS enumerates completion keys via a short-lived ephemeral `watchall` snapshot capped by `max_scan_keys`; in-memory transport walks stored executions up to the same cap without copying the full map. |
 | Heartbeat / TTL | Uncertainty retains ownership; no takeover from elapsed heartbeat or presence expiry alone. |
 | Providers | Process-lifetime **provider + `resources=`** is rejected before handler entry (v1). |
 | Local CLI | Resource-bound handlers are **rejected** for local `run` paths that skip broker admission; **remote `submit`** remains available. |
@@ -46,6 +47,8 @@ Controller and contract packages import admission types without worker handlers:
 - Recovery: `TerminationConfirmation` (`confirmed=True`, non-empty `evidence`).
 - Stores: `InMemoryResourceAdmissionStore`, `NatsResourceAdmissionStore`,
   `ResourceAdmission`.
+- Observation: `WaitingExecutionView`, `read_waiting_executions()`,
+  `supports_waiting_execution_observation()`.
 
 ### Worker runtime
 
@@ -54,7 +57,7 @@ Controller and contract packages import admission types without worker handlers:
   `catalog.register(job, callback, resources={key: 1})` bind requirements.
 - Runtime mirrors the same with `@jobs.handler(..., resources=…)` and
   `jobs.register(..., resources=…)`.
-- `jobs.resources` exposes `snapshot()` and `resolve_terminated_incarnation()` on
+- `jobs.resources` exposes `snapshot()`, `waiting_executions()`, and `resolve_terminated_incarnation()` on
   runtimes backed by an admission store.
 - `jobs.worker_incarnation` returns the immutable `WorkerIncarnation` used by
   resource admission for the current serving lifetime. It raises `RuntimeError`

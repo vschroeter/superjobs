@@ -9,6 +9,9 @@ from superjobs.resources.errors import (
     ResourceStaleOperationError,
     ResourceStoreUnavailableError,
     ResourceValidationError,
+    UnsupportedWaitingExecutionBackendError,
+    WaitingExecutionObservationError,
+    WaitingExecutionUnavailableError,
 )
 from superjobs.resources.memory import InMemoryResourceAdmissionStore
 from superjobs.resources.models import (
@@ -31,12 +34,20 @@ from superjobs.resources.models import (
     StoredResourceRecord,
     TerminationConfirmation,
     UnavailableReason,
+    WaitingExecutionCompleteness,
+    WaitingExecutionEntry,
+    WaitingExecutionView,
     WorkerIncarnation,
     parse_exclusive_resource_requirement,
     V1_EXCLUSIVE_CAPACITY,
     V1_MAX_RESOURCE_REQUIREMENTS,
 )
 from superjobs.resources.nats import NatsResourceAdmissionStore
+from superjobs.resources.waiting_execution import (
+    DEFAULT_MAX_WAITING_EXECUTION_ENTRIES,
+    read_waiting_executions,
+    supports_waiting_execution_observation,
+)
 
 __all__ = [
     "AdmissionAcquireIntent",
@@ -46,6 +57,7 @@ __all__ = [
     "AcquireResult",
     "AcquisitionOutcome",
     "CapacityDeclaration",
+    "DEFAULT_MAX_WAITING_EXECUTION_ENTRIES",
     "InMemoryResourceAdmissionStore",
     "NatsResourceAdmissionStore",
     "ReconcileOutcome",
@@ -68,8 +80,16 @@ __all__ = [
     "ResourceValidationError",
     "StoredExecutionClaim",
     "StoredResourceRecord",
+    "read_waiting_executions",
+    "supports_waiting_execution_observation",
     "TerminationConfirmation",
+    "UnsupportedWaitingExecutionBackendError",
     "UnavailableReason",
+    "WaitingExecutionCompleteness",
+    "WaitingExecutionEntry",
+    "WaitingExecutionObservationError",
+    "WaitingExecutionUnavailableError",
+    "WaitingExecutionView",
     "V1_EXCLUSIVE_CAPACITY",
     "V1_MAX_RESOURCE_REQUIREMENTS",
     "WorkerIncarnation",
