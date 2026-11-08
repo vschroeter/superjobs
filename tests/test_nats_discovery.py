@@ -150,6 +150,45 @@ async def test_repeated_read_snapshot_bounded_ephemeral_consumers(
 
 @pytest.mark.nats
 @pytest.mark.asyncio
+async def test_discovery_retains_workers_when_initial_marker_precedes_delivery(
+    nats_url: str, nats_queue_config, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, backend = await _connect_backend(nats_url, nats_queue_config)
+    discovery = backend.discovery_backend
+    identity = JobIdentity(name="samplegen.tts.qwen", version="1")
+    try:
+        await discovery.write_registration(
+            _build_registration(worker_id="qwen-live", job=identity, at=datetime.now(UTC)),
+            max_envelope_bytes=discovery.config.max_envelope_bytes,
+        )
+        start = discovery._start_kv_watchall
+
+        class EarlyMarkerWatcher:
+            def __init__(self, watcher):
+                self.watcher = watcher
+
+            def __getattr__(self, name):
+                return getattr(self.watcher, name)
+
+            async def __aiter__(self):
+                yield None
+                async for entry in self.watcher:
+                    yield entry
+
+        async def early_marker(*args, **kwargs):
+            watcher, task = await start(*args, **kwargs)
+            return EarlyMarkerWatcher(watcher), task
+
+        monkeypatch.setattr(discovery, "_start_kv_watchall", early_marker)
+        assert await list_offered_jobs(backend) == [identity]
+        workers = await list_worker_registrations(backend, identity)
+        assert [worker.worker_id for worker in workers] == ["qwen-live"]
+    finally:
+        await backend.stop()
+
+
+@pytest.mark.nats
+@pytest.mark.asyncio
 async def test_existing_compatible_bucket_reused(
     nats_url: str,
     nats_queue_config,
