@@ -286,6 +286,11 @@ async def test_bounded_snapshot_includes_external_write_before_read() -> None:
                 None,
             ],
         )
+        watcher._sub = MagicMock()
+        info = MagicMock()
+        info.delivered.consumer_seq = 1
+        info.num_pending = 0
+        watcher._sub.consumer_info = AsyncMock(return_value=info)
         return watcher
 
     kv = MagicMock()

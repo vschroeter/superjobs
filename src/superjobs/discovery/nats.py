@@ -678,17 +678,29 @@ class NatsDiscoveryBackend:
         )
         entries: list[tuple[tuple[str, str, str | None], bytes]] = []
         try:
+            # nats-py's initial None marker can precede already-dispatched values:
+            # the server has no pending messages before local callbacks run.
+            # Capture the server's delivery boundary rather than trusting that marker.
+            info = await watcher._sub.consumer_info()
+            expected = info.delivered.consumer_seq + info.num_pending
+            observed = 0
             async for entry in watcher:
-                if entry is None:
+                if observed >= expected:
                     break
+                if entry is None:
+                    continue
+                observed += 1
                 if not entry.key.startswith(f"{_KV_KEY_PREFIX}."):
                     raise DiscoveryEnvelopeError(
                         f"Unexpected key in discovery KV bucket: {entry.key!r}",
                     )
-                if entry.operation in _KV_DELETE_OPERATIONS or entry.value is None:
-                    continue
-                logical_key = parse_registration_kv_key(entry.key)
-                entries.append((logical_key, entry.value))
+                if entry.operation not in _KV_DELETE_OPERATIONS and entry.value is not None:
+                    logical_key = parse_registration_kv_key(entry.key)
+                    entries.append((logical_key, entry.value))
+                if observed >= expected:
+                    break
+            if observed < expected:
+                raise DiscoveryUnavailableError("Discovery registry snapshot is incomplete")
         except asyncio.CancelledError:
             cleanup = asyncio.create_task(
                 self._release_kv_watchall(
