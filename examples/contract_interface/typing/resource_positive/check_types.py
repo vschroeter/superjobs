@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import assert_type
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from superjobs import HandlerCatalog, JobContext, SuperJobs
+from superjobs import HandlerCatalog, JobContext, NatsQueueConfig, SuperJobs
+from superjobs.jobs.execution import JobState
 from superjobs.resources import (
     AdmissionFencing,
     AdmissionOwner,
@@ -15,8 +16,13 @@ from superjobs.resources import (
     ResourceRequirement,
     TerminationConfirmation,
     V1_EXCLUSIVE_CAPACITY,
+    WaitingExecutionCompleteness,
+    WaitingExecutionEntry,
+    WaitingExecutionEvidence,
+    WaitingExecutionView,
     WorkerIncarnation,
     parse_exclusive_resource_requirement,
+    read_waiting_executions_from_broker,
 )
 from superjobs_contract_example import (
     HEARTBEAT_JOB,
@@ -43,6 +49,14 @@ async def _residency_context(context: JobContext[None], jobs: SuperJobs) -> None
     context.retain_resource("model-snapshot", cleanup, idle_timeout=30)
     assert_type(await jobs.resources.request_release(DEVICE_KEY), bool)
     await context.release_resource()
+
+
+def _shared_resource_namespace_queue_config() -> None:
+    default = NatsQueueConfig()
+    assert_type(default.resource_namespace, str | None)
+    explicit = NatsQueueConfig(resource_namespace="physical_host")
+    assert_type(explicit.resource_namespace, str | None)
+    assert_type(explicit.resolved_resource_admission_namespace(), str)
 
 
 def _exclusive_requirement() -> None:
@@ -129,6 +143,33 @@ def _runtime_capacity_and_controller_surface() -> None:
     _ = jobs.resources
     assert_type(jobs.worker_incarnation, WorkerIncarnation)
     _runtime_decorators_and_register(jobs)
+
+
+def _waiting_execution_observation_types() -> None:
+    async def observe(jobs: SuperJobs) -> None:
+        view = await jobs.resources.waiting_executions(max_entries=10)
+        assert_type(view, WaitingExecutionView)
+        assert_type(view.completeness, WaitingExecutionCompleteness)
+        if view.entries:
+            entry = view.entries[0]
+            assert_type(entry, WaitingExecutionEntry)
+            assert_type(entry.resource_key, str)
+            assert_type(entry.record_state, JobState)
+            assert_type(entry.evidence, WaitingExecutionEvidence)
+            assert_type(entry.waiting_invocation_id, UUID | None)
+
+    _ = observe
+
+
+def _fresh_broker_waiting_observation_types(broker: object, queue_config: object) -> None:
+    async def observe() -> None:
+        view = await read_waiting_executions_from_broker(
+            broker,  # type: ignore[arg-type]
+            queue_config=queue_config,  # type: ignore[arg-type]
+        )
+        assert_type(view, WaitingExecutionView)
+
+    _ = observe
 
 
 def _context_cleanup_api(context: JobContext[ManifestEvent]) -> None:

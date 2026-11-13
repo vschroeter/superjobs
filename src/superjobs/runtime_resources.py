@@ -9,15 +9,23 @@ from superjobs.resources.models import (
     RecoveryResult,
     ReleaseResult,
     TerminationConfirmation,
+    WaitingExecutionView,
 )
+from superjobs.resources.waiting_execution import read_waiting_executions
 from superjobs.transport.backend import JobBackend
 
 
 class RuntimeResources:
     """Ownership snapshot and confirmed recovery for the active runtime."""
 
-    def __init__(self, admission: ResourceAdmission) -> None:
+    def __init__(
+        self,
+        admission: ResourceAdmission,
+        *,
+        backend: JobBackend,
+    ) -> None:
         self._admission = admission
+        self._backend = backend
 
     async def snapshot(self) -> AdmissionSnapshot:
         return await self._admission.snapshot()
@@ -25,6 +33,30 @@ class RuntimeResources:
     async def request_release(self, resource_key: str) -> bool:
         """Request cooperative retained-resource teardown without revoking its owner."""
         return await self._admission.request_release(resource_key)
+
+
+    async def waiting_executions(
+        self,
+        *,
+        max_entries: int | None = None,
+    ) -> WaitingExecutionView:
+        """Read-only view of persisted resource-waiting completion records.
+
+        Requires the runtime transport to have started already; normal startup may
+        provision JetStream buckets. Entries reflect durable
+        ``waiting_for_resource`` records with a requested resource key; they are
+        historical evidence only and do not prove live blocking. Any scanned
+        ``waiting_for_resource`` or ``pending`` record marks the view ``partial``
+        because liveness cannot be verified from observation alone.
+        ``evaluated_at`` is when the scan started; stored evidence may be older;
+        concurrent writers may race the view during and after the scan.
+        Completeness reflects bounded scan coverage, not live contention.
+        The read path does not mutate admission or write broker completion data.
+        """
+        return await read_waiting_executions(
+            self._backend,
+            max_entries=max_entries,
+        )
 
     async def release_resource_after_cleanup(
         self, owner: AdmissionOwner

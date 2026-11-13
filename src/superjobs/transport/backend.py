@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
+from uuid import UUID
 
 from superjobs.jobs.events import JobEvent
 from superjobs.jobs.execution import (
@@ -54,6 +55,9 @@ class ExecutionRecord:
     observation_lock_token: str | None = None
     observation_lock_expires_at: datetime | None = None
     admission_owner_wire: dict[str, Any] | None = None
+    waiting_resource_key: str | None = None
+    waiting_resource_invocation_id: UUID | None = None
+    waiting_resource_attempt: int | None = None
 
     def status(self) -> JobStatus:
         return JobStatus(
@@ -142,6 +146,8 @@ class ExecutionStore(Protocol):
         expected_admission_owner: AdmissionOwner | None = None,
         target_state: JobState = JobState.RUNNING,
         admission_owner: AdmissionOwner | None = None,
+        waiting_resource_key: str | None = None,
+        waiting_resource_invocation_id: UUID | None = None,
     ) -> None: ...
 
     async def update_progress(

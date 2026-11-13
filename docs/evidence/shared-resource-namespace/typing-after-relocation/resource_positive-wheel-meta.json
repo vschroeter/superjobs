@@ -1,0 +1,10 @@
+{
+  "mode": "wheel",
+  "suite": "resource_positive",
+  "pyright": "1.1.414",
+  "python_static": "3.12",
+  "venv": "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\venv-typing-shared",
+  "runtime_python": "3.12.11 (main, Jun  4 2025, 17:41:36) [MSC v.1943 64 bit (AMD64)]",
+  "runtime_executable": "C:\\Users\\schoc\\.codex\\visualizations\\2026\\10\\29\\01a18705-5acc-7060-a03e-2ef0a54f7fc7\\namespace-design\\superjobs-contract-typing-63ktomrc\\venv-typing-shared\\Scripts\\python.exe",
+  "errors": []
+}

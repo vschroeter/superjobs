@@ -20,8 +20,9 @@ boolean.
 | Keys | Caller selects stable **host + physical device** identity; shared across Job identities on the same device. |
 | Delivery | **At-least-once**; after an undurable worker crash, handlers and external effects must stay idempotent. |
 | Physical checks | No generic GPU/OS memory or process verification; only durable ownership and application cleanup/termination paths. |
-| Snapshots | `jobs.resources.snapshot()` is diagnostic; records are not TTL-trimmed into automatic release. |
+| Snapshots | `jobs.resources.snapshot()` is diagnostic; records are not TTL-trimmed into automatic release. NATS key scans clean up their ephemeral consumer on successful reads. If the broker fails during cancellation, cleanup is best effort and immediate consumer removal cannot be confirmed. |
 | Waiting | `JobState.WAITING_FOR_RESOURCE` (`waiting_for_resource`); waiting does not spend an inference retry merely because another worker holds the device. |
+| Waiting observation | Bounded read-only scan of completion records. Listed entries are durable ``waiting_for_resource`` records with a persisted requested resource key, labeled ``WaitingExecutionEvidence.PERSISTED_HISTORICAL`` (historical evidence only; matching attempt or invocation metadata does not prove the writer is alive). Any scanned ``waiting_for_resource`` or ``pending`` record marks the view ``partial`` because liveness cannot be verified. Legacy waiting records without a key are omitted and also mark ``partial``. ``pending`` records never appear as entries. ``jobs.resources.waiting_executions()`` uses the started runtime transport (normal ``start()`` may provision JetStream buckets). ``read_waiting_executions_from_broker()`` opens existing completion KV read-only without provisioning stores; a missing completion bucket yields ``WaitingExecutionUnavailableError`` (absence does not prove an unused namespace). An existing empty completion bucket can yield an empty complete view. Scans are non-atomic; ``evaluated_at`` is when the scan started; stored evidence may be older and races can yield stale, partial, truncated, or empty views distinct from ``WaitingExecutionUnavailableError``. Observation never acquires, releases, reconciles, or writes admission or completion state. NATS uses a short-lived ephemeral ``watchall`` snapshot capped by ``max_scan_keys``. |
 | Heartbeat / TTL | Uncertainty retains ownership; no takeover from elapsed heartbeat or presence expiry alone. |
 | Providers | Process-lifetime **provider + `resources=`** is rejected before handler entry (v1). |
 | Local CLI | Resource-bound handlers are **rejected** for local `run` paths that skip broker admission; **remote `submit`** remains available. |
@@ -46,6 +47,8 @@ Controller and contract packages import admission types without worker handlers:
 - Recovery: `TerminationConfirmation` (`confirmed=True`, non-empty `evidence`).
 - Stores: `InMemoryResourceAdmissionStore`, `NatsResourceAdmissionStore`,
   `ResourceAdmission`.
+- Observation: `WaitingExecutionView`, `read_waiting_executions()`,
+  `read_waiting_executions_from_broker()`, `supports_waiting_execution_observation()`.
 
 ### Worker runtime
 
@@ -54,7 +57,7 @@ Controller and contract packages import admission types without worker handlers:
   `catalog.register(job, callback, resources={key: 1})` bind requirements.
 - Runtime mirrors the same with `@jobs.handler(..., resources=…)` and
   `jobs.register(..., resources=…)`.
-- `jobs.resources` exposes `snapshot()` and `resolve_terminated_incarnation()` on
+- `jobs.resources` exposes `snapshot()`, `waiting_executions()`, and `resolve_terminated_incarnation()` on
   runtimes backed by an admission store.
 - `jobs.worker_incarnation` returns the immutable `WorkerIncarnation` used by
   resource admission for the current serving lifetime. It raises `RuntimeError`
@@ -204,8 +207,9 @@ workers/controllers, and reconcile existing ownership before removing guards.
 Every consumer of a resource-bound Job must follow the same admission policy;
 older workers do not acquire these reservations. Keep claims in execution
 provenance outside frozen generation inputs. Offline probes need the same NATS
-namespace. Verify the mixed Windows-controller/Linux-worker application and
-supervisor lifecycle before removing its filesystem guards.
+account/domain and resource-admission namespace. Verify the mixed
+Windows-controller/Linux-worker application and supervisor lifecycle before
+removing its filesystem guards.
 
 ## Related checks
 
@@ -214,3 +218,58 @@ supervisor lifecycle before removing its filesystem guards.
 | [development.md](development.md) | Contract typing and `dev_check` commands |
 | [verification.md](verification.md) | Dated measured results |
 | `tools/verify_resource_admission.py` | Cross-process admission scenarios; required in `dev_check integration` / `full` |
+
+## Shared resource-admission namespace (optional)
+
+Work transport settings (`NatsQueueConfig.subject_prefix`, streams, completion/idempotency
+buckets, worker discovery subjects) can differ per application queue while **resource
+admission** KV state is shared when every participant uses the same broker account,
+JetStream domain, **`resource_namespace`**, and **resource key**. Matching resource keys
+alone is insufficient when admission buckets still derive from different work prefixes.
+
+```python
+from superjobs import NatsQueueConfig
+
+work_a = NatsQueueConfig(
+    stream="work_a_stream",
+    observation_stream="work_a_observations",
+    subject_prefix="work_a",
+    completion_bucket="work_a_completions",
+    idempotency_bucket="work_a_idempotency",
+    resource_namespace="physical_host",
+)
+
+work_b = NatsQueueConfig(
+    stream="work_b_stream",
+    observation_stream="work_b_observations",
+    subject_prefix="work_b",
+    completion_bucket="work_b_completions",
+    idempotency_bucket="work_b_idempotency",
+    resource_namespace="physical_host",
+)
+```
+
+Omit `resource_namespace` (default `None`) to keep the previous behavior: admission
+storage derives from each queue's `subject_prefix`. Explicit values must match a
+fail-closed token grammar (dot-separated `[A-Za-z0-9_-]` segments; no wildcards,
+whitespace, or silent normalization).
+
+Cross-queue controllers can call `jobs.resources.snapshot()` and
+`resolve_terminated_incarnation()` against the shared bucket even when their work
+prefix differs. Removing a diagnostic work queue must not delete the shared admission
+KV bucket or reset its fencing/revocation history. Admission records remain without
+TTL; uncertainty never releases ownership based on presence expiry or disconnect alone.
+Custom execution IDs must also be unique across the shared admission namespace;
+otherwise its execution claims conservatively prevent overlapping invocations.
+
+### Samplegen (external integration)
+
+Samplegen currently has fixed transport/broker-check defaults, a probe using the
+`superjobs` admission namespace, and a storage-based physical host identity. A
+separately verified diagnostic adapter must consistently supply private work
+settings, an explicitly shared resource namespace, and the existing host identity.
+Its `serve_worker(..., runtime_factory=...)` and `Orchestrator(..., jobs,
+broker_check=...)` seams permit programmatic integration without renaming engine
+Jobs. No existing Samplegen CLI namespace override is implied by this library
+change. Keep diagnostic databases/output private, models read-only, and termination
+confirmation restricted to the supervisor's own verified child incarnation.

@@ -6,6 +6,7 @@ import binascii
 import hashlib
 import inspect
 import re
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -590,6 +591,79 @@ class NatsDiscoveryBackend:
             ))
             return keys
 
+    async def bounded_kv_meta_key_scan(
+        self,
+        kv: KeyValue,
+        *,
+        max_keys: int,
+        deadline_monotonic: float,
+    ) -> tuple[list[str], bool]:
+        """Collect at most ``max_keys`` KV keys via a short-lived ``watchall`` snapshot.
+
+        Uses an ephemeral consumer that is stopped before return. The returned
+        ``scan_truncated`` flag is true when the scan stopped because of ``max_keys``,
+        ``deadline_monotonic``, or an incomplete snapshot; it is false when the
+        watchall snapshot ended normally with fewer than ``max_keys`` keys.
+        """
+        watcher, init_task = await self._start_kv_watchall(
+            kv,
+            ignore_deletes=True,
+            meta_only=True,
+        )
+        keys: list[str] = []
+        scan_truncated = False
+        try:
+            async for entry in watcher:
+                if entry is None:
+                    break
+                if time.monotonic() >= deadline_monotonic:
+                    scan_truncated = True
+                    break
+                keys.append(entry.key)
+                if len(keys) >= max_keys:
+                    scan_truncated = True
+                    break
+        except asyncio.CancelledError:
+            cleanup = asyncio.create_task(
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=True,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
+                name="superjobs-discovery-kv-watchall-cleanup",
+            )
+            try:
+                await finish_cleanup(cleanup)
+            except asyncio.CancelledError:
+                pass
+            raise
+        except Exception:
+            await finish_cleanup(asyncio.create_task(
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=False,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
+                name="superjobs-discovery-kv-watchall-cleanup",
+            ))
+            raise
+        else:
+            await finish_cleanup(asyncio.create_task(
+                self._release_kv_watchall(
+                    watcher,
+                    init_task,
+                    on_cancel=False,
+                    kv=kv,
+                    delete_ephemeral_consumer=True,
+                ),
+                name="superjobs-discovery-kv-watchall-cleanup",
+            ))
+            return keys, scan_truncated
+
     async def _fetch_kv_entry(self, kv: KeyValue, key: str) -> KeyValue.Entry:
         return await kv.get(key)
 
@@ -604,17 +678,29 @@ class NatsDiscoveryBackend:
         )
         entries: list[tuple[tuple[str, str, str | None], bytes]] = []
         try:
+            # nats-py's initial None marker can precede already-dispatched values:
+            # the server has no pending messages before local callbacks run.
+            # Capture the server's delivery boundary rather than trusting that marker.
+            info = await watcher._sub.consumer_info()
+            expected = info.delivered.consumer_seq + info.num_pending
+            observed = 0
             async for entry in watcher:
-                if entry is None:
+                if observed >= expected:
                     break
+                if entry is None:
+                    continue
+                observed += 1
                 if not entry.key.startswith(f"{_KV_KEY_PREFIX}."):
                     raise DiscoveryEnvelopeError(
                         f"Unexpected key in discovery KV bucket: {entry.key!r}",
                     )
-                if entry.operation in _KV_DELETE_OPERATIONS or entry.value is None:
-                    continue
-                logical_key = parse_registration_kv_key(entry.key)
-                entries.append((logical_key, entry.value))
+                if entry.operation not in _KV_DELETE_OPERATIONS and entry.value is not None:
+                    logical_key = parse_registration_kv_key(entry.key)
+                    entries.append((logical_key, entry.value))
+                if observed >= expected:
+                    break
+            if observed < expected:
+                raise DiscoveryUnavailableError("Discovery registry snapshot is incomplete")
         except asyncio.CancelledError:
             cleanup = asyncio.create_task(
                 self._release_kv_watchall(

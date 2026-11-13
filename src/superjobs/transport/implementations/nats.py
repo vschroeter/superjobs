@@ -4,6 +4,11 @@ from datetime import timedelta
 
 from faststream.nats import NatsMessage
 
+from superjobs.resources.errors import ResourceConfigurationError
+from superjobs.resources.keys import (
+    resolve_resource_admission_namespace,
+    validate_resource_admission_namespace,
+)
 from superjobs.transport.delivery import Delivery
 
 
@@ -74,6 +79,13 @@ class NatsQueueConfig:
     observation_max_bytes: int | None = None
     observation_max_msgs: int | None = None
     result_max_age: float | None = None
+    resource_namespace: str | None = None
+
+    def resolved_resource_admission_namespace(self) -> str:
+        return resolve_resource_admission_namespace(
+            self.subject_prefix,
+            self.resource_namespace,
+        )
 
     def __post_init__(self) -> None:
         if not self.stream or not self.observation_stream:
@@ -98,3 +110,8 @@ class NatsQueueConfig:
             raise ValueError("observation_max_msgs must be positive")
         if self.result_max_age is not None and self.result_max_age <= 0:
             raise ValueError("result_max_age must be positive")
+        if self.resource_namespace is not None:
+            try:
+                validate_resource_admission_namespace(self.resource_namespace)
+            except ResourceConfigurationError as exc:
+                raise ValueError(str(exc)) from exc

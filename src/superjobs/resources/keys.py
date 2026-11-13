@@ -12,6 +12,7 @@ from superjobs.resources.errors import (
 _BUCKET_SUFFIX = "-resource-admission"
 _VALID_BUCKET_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 _KV_SAFE_KEY_RE = re.compile(r"^[-/_=\.a-zA-Z0-9]+$")
+_ADMISSION_NAMESPACE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 _CAPACITY_PREFIX = "cap.v1"
 _RESOURCE_PREFIX = "res.v1"
@@ -33,6 +34,58 @@ def validate_resource_key(key: str) -> str:
             "resource key contains characters that are not KV-safe"
         )
     return key
+
+
+def validate_resource_admission_namespace(namespace: str) -> str:
+    """Validate an explicit resource-admission namespace token (fail-closed, no normalization)."""
+    if not isinstance(namespace, str):
+        raise ResourceConfigurationError(
+            "resource admission namespace must be a string",
+        )
+    if not namespace:
+        raise ResourceConfigurationError(
+            "resource admission namespace must not be empty",
+        )
+    if namespace != namespace.strip():
+        raise ResourceConfigurationError(
+            "resource admission namespace must not have leading or trailing whitespace",
+        )
+    if any(ch.isspace() for ch in namespace):
+        raise ResourceConfigurationError(
+            "resource admission namespace must not contain whitespace",
+        )
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in namespace):
+        raise ResourceConfigurationError(
+            "resource admission namespace must not contain control characters",
+        )
+    if namespace[0] == "." or namespace[-1] == ".":
+        raise ResourceConfigurationError(
+            "resource admission namespace must not start or end with '.'",
+        )
+    if ".." in namespace:
+        raise ResourceConfigurationError(
+            "resource admission namespace must not contain empty dot-separated segments",
+        )
+    if "*" in namespace or ">" in namespace:
+        raise ResourceConfigurationError(
+            "resource admission namespace must not contain NATS wildcard characters",
+        )
+    for segment in namespace.split("."):
+        if _ADMISSION_NAMESPACE_TOKEN_RE.fullmatch(segment) is None:
+            raise ResourceConfigurationError(
+                "resource admission namespace segments may contain only "
+                "ASCII letters, digits, '_', and '-'",
+            )
+    return namespace
+
+
+def resolve_resource_admission_namespace(
+    subject_prefix: str,
+    resource_namespace: str | None,
+) -> str:
+    if resource_namespace is None:
+        return subject_prefix
+    return validate_resource_admission_namespace(resource_namespace)
 
 
 def admission_bucket_name(subject_prefix: str) -> str:

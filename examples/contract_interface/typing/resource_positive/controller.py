@@ -29,6 +29,8 @@ async def main() -> None:
         print(result.revision)
 
         snapshot = await jobs.resources.snapshot()
+        waiting = await jobs.resources.waiting_executions()
+        print(waiting.completeness.value, len(waiting.entries))
         stale_owner = None
         for record in snapshot.resources:
             if record.owner is not None:
