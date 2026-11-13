@@ -44,3 +44,10 @@ virtual environments). Run commands with `uv run` (for example
 
 When an agent creates a git commit, it may push that commit to the remote
 without asking for separate push confirmation.
+
+## Temporary local-only validation
+
+Owner instruction, 2026-11-13: validate changes with local tests only while
+GitHub Actions is paused for account limits. Preserve workflow definitions;
+enable, dispatch or rerun hosted CI only after an explicit owner request.
+Report local validation and any untested environments separately.
