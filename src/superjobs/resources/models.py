@@ -161,10 +161,15 @@ class StoredResourceRecord(BaseModel):
     reason_detail: str | None = None
     heartbeat_at: datetime | None = None
     updated_at: datetime
+    retained: bool = False
+    residency_key: str | None = None
+    release_requested: bool = False
 
     @model_validator(mode="after")
     def _validate_state(self) -> Self:
         validate_resource_key(self.resource_key)
+        if self.retained and (self.owner is None or not self.residency_key):
+            raise ValueError("retained resources require an owner and residency key")
         if self.availability is ResourceAvailability.AVAILABLE:
             if self.owner is not None:
                 raise ValueError("available resource records must not carry an owner")

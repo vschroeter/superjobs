@@ -15,5 +15,6 @@ status and measured proofs are separated in [api.md](../api.md) and
 | [0007](0007-job-bound-worker-capability-typing.md) | Job-bound worker capability typing |
 | [0008](0008-live-job-discovery-and-raw-inspection.md) | Live Job discovery and raw inspection |
 | [0009](0009-resource-admission-and-confirmed-recovery.md) | Resource admission and confirmed recovery |
+| [0010](0010-resource-residency-between-executions.md) | Resource residency between executions |
 
 Wayfinder map: [issue #28](https://github.com/vschroeter/superjobs/issues/28).

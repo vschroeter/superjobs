@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -260,6 +260,37 @@ class JobContext[InterT: Any]:
     def acknowledge_resource_cleanup(self) -> None:
         """Confirm cleanup has finished, including on an inference error path."""
         acknowledge_resource_cleanup(self)
+
+    def resource_reused(self, key: str) -> bool:
+        """Whether this admitted invocation inherited the requested resident state."""
+        config, owner = self._residency_binding()
+        return config.coordinator.residency.reused(owner, key)
+
+    def _residency_binding(self):
+        binding = getattr(self, '_resource_residency_binding', None)
+        if binding is None or binding[0].coordinator is None:
+            raise RuntimeError('Resource residency requires an admitted runtime handler')
+        return binding
+
+    def retain_resource(self, key: str, cleanup: Callable[[], Awaitable[None]], *, idle_timeout: float = 30) -> None:
+        """Offer resident state for reuse; cleanup runs on expiry, contention or shutdown."""
+        config, owner = self._residency_binding()
+        config.coordinator.residency.offer(config, owner, key, cleanup, idle_timeout)
+        self._resource_retention_requested = True
+
+    async def prepare_resource(self, key: str, prepare: Callable[[], Awaitable[None]],
+                               cleanup: Callable[[], Awaitable[None]], *, idle_timeout: float = 30) -> bool:
+        """Prepare or reuse a resident resource while holding exclusive admission."""
+        config, owner = self._residency_binding()
+        self._resource_retention_requested = True
+        return await config.coordinator.residency.prepare(config, owner, key, prepare, cleanup, idle_timeout)
+
+    async def release_resource(self) -> None:
+        """Clean this invocation's resident state while retaining execution fencing."""
+        config, owner = self._residency_binding()
+        await config.coordinator.residency.clean_active(owner)
+        self._resource_retention_requested = False
+        self.acknowledge_resource_cleanup()
 
     def resource_cleanup_failed(self, reason: str) -> None:
         """Retain admission because application resource cleanup failed."""

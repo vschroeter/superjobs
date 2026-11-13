@@ -97,8 +97,12 @@ One concrete invocation processing a delivered request, distinguished from simul
 _Avoid_: Job execution identity, inference retry
 
 **Resource reservation**:
-Ownership of a resource by an admitted delivery invocation, retained until acknowledged cleanup or confirmed termination permits release.
+Exclusive ownership of a resource for an admitted delivery invocation or a worker's resource residency, continuing until acknowledged cleanup or confirmed termination permits release.
 _Avoid_: Presence lease, automatic expiry, routing reservation
+
+**Resource residency**:
+Resource-consuming state retained by a worker between completed Job executions under continuous exclusive resource ownership.
+_Avoid_: Running Job, expiring ownership lease, unreserved cache
 
 **Admission token**:
 The identity and generation of an admission owner used to reject operations from an earlier owner.

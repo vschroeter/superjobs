@@ -14,7 +14,9 @@ class ResourceRuntimeCoordinator:
     """Withdraws readiness and blocks new admission without cancelling live work."""
 
     def __init__(self, runtime: SuperJobs) -> None:
+        from superjobs.jobs.resource_residency import ResourceResidency
         self._runtime = runtime
+        self.residency = ResourceResidency(self)
         self._blocked_keys: set[str] = set()
         self._lock = asyncio.Lock()
 

@@ -31,6 +31,20 @@ DEVICE_KEY = "sample-host.gpu0"
 _RESOURCES = {DEVICE_KEY: V1_EXCLUSIVE_CAPACITY}
 
 
+async def _residency_context(context: JobContext[None], jobs: SuperJobs) -> None:
+    async def prepare() -> None:
+        pass
+
+    async def cleanup() -> None:
+        pass
+
+    assert_type(context.resource_reused("model-snapshot"), bool)
+    assert_type(await context.prepare_resource("model-snapshot", prepare, cleanup, idle_timeout=30), bool)
+    context.retain_resource("model-snapshot", cleanup, idle_timeout=30)
+    assert_type(await jobs.resources.request_release(DEVICE_KEY), bool)
+    await context.release_resource()
+
+
 def _exclusive_requirement() -> None:
     requirement = parse_exclusive_resource_requirement(_RESOURCES)
     assert_type(requirement, ResourceRequirement)

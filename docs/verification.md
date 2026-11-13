@@ -337,3 +337,26 @@ Additional recorded checks (not rerun for documentation): Windows py313 fast gat
 **719 passed**, 2 platform skips; missing `NATS_EXECUTABLE` control exits 1; verifier
 unit tests 16 passed on Windows. CLI negative typing suite totals **27** diagnostics
 on current `feature/cli`.
+# Resource residency verification — 2026-11-13
+
+Local Windows verification of bounded resource residency passed: 992 deterministic
+tests (two existing skips), 74 real-NATS tests, and installed Python 3.12 producer,
+worker and controller resource-admission scenarios (cross-Job contention,
+redelivery, confirmed process termination and broker restart). Source and installed
+wheel typing both pass, including the new positive residency methods and three
+negative misuse cases; 460 installed-runtime tests pass.
+
+Focused residency checks cover uninterrupted fenced handoff after Job completion,
+cooperative release for a competing runtime, stale release rejection, a lost CAS
+acknowledgement, idle expiry, model switching, native-call drain on cancellation,
+shutdown and cleanup failure. Existing handlers retain their default cleanup
+behavior. Retained records use an explicit version-2 resource wire representation;
+older resource readers must be upgraded before retention is enabled.
+
+Downstream Samplegen passed its native completion/stop and operator-control checks.
+A Linux-container Qwen probe on the shared RTX 3080 Ti reproduced two existing
+different-voice source cases byte for byte with one load across two executions.
+Second preparation took 0.0095 seconds and its generator call 1.705 seconds; final
+cleanup and native broker release were confirmed. This is a bounded GPU proof,
+not hosted CI, a multi-GPU qualification, or a retained-state qualification of
+every generator. Local receipts remain outside Git.

@@ -378,6 +378,10 @@ class SuperJobs:
                 return_exceptions=True,
             )
             errors = [result for result in results if isinstance(result, BaseException)]
+            try:
+                await self._resource_coordinator.residency.close()
+            except BaseException as error:
+                errors.append(error)
             errors.extend(presence_errors)
             if errors:
                 completion.error = errors[0]
