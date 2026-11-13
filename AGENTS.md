@@ -22,15 +22,8 @@ Keep design questions separate from implementation acceptance criteria. Use a
 Wayfinder map for efforts spanning several decisions; link tickets by title and
 use native sub-issues and dependencies where available.
 
-Codex plans work, directs agents, and independently reviews their results. Delegate
-most implementation work to the Cursor agent CLI with model `composer-2.5`.
-The maintainer explicitly authorized transferring this repository's source and
-project context to Cursor/Composer 2.5 for analysis and implementation on
-2026-09-28.
-Give each task a bounded scope, acceptance criteria, and appropriate verification.
-Request targeted corrections when a result is poor. Implement directly only after
-repeated unsuccessful Cursor attempts; report CLI or authentication blockers
-instead of silently substituting another implementation model.
+Implement directly. Use external agents and transfer project context to them only
+when the maintainer explicitly requests it in the current chat.
 
 Prove typing with a static checker and positive and negative consumer examples.
 Exercise contracts through public imports, including the installed distribution.

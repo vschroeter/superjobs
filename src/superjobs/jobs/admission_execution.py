@@ -234,7 +234,8 @@ async def _process_invocation(
                 continue
             try:
                 result = await _retry(
-                    lambda: config.admission.try_acquire(intent), config
+                    lambda: config.coordinator.residency.acquire(config, intent)
+                    if config.coordinator is not None else config.admission.try_acquire(intent), config
                 )
             except ResourcePartialAcquisitionError:
                 # Reuse the same intent to reconcile a lost write acknowledgement.
@@ -288,6 +289,12 @@ async def _invoke(handler: Any, request: Any, context: JobContext[Any]) -> Any:
     return await result if inspect.isawaitable(result) else result
 
 
+async def _release_active_resource(config: ResourceHandlerConfig, owner: AdmissionOwner):
+    if config.coordinator is not None:
+        await config.coordinator.residency.clean_active(owner)
+    return await config.admission.release_resource_after_cleanup(owner)
+
+
 async def _run_admitted(
     handler: Any,
     item: WorkItem,
@@ -304,14 +311,14 @@ async def _run_admitted(
     await _refresh(handler, item)
     if item.execution.state in TERMINAL:
         await _retry(
-            lambda: config.admission.release_resource_after_cleanup(owner), config
+            lambda: _release_active_resource(config, owner), config
         )
         await _retry(lambda: config.admission.finalize_execution_claim(owner), config)
         await _terminal(handler, item)
         return
     if cancelled.is_set():
         await _retry(
-            lambda: config.admission.release_resource_after_cleanup(owner), config
+            lambda: _release_active_resource(config, owner), config
         )
         await _retry(
             lambda: handler.backend.mark_retry(
@@ -334,7 +341,7 @@ async def _run_admitted(
         and datetime.now(UTC) >= item.execution.deadline
     )
     if cancel_requested or deadline_expired:
-        await _retry(lambda: config.admission.release_resource_after_cleanup(owner), config)
+        await _retry(lambda: _release_active_resource(config, owner), config)
         await _persist(
             handler, item, config, owner,
             state=JobState.CANCELLED if cancel_requested else JobState.FAILED,
@@ -356,6 +363,8 @@ async def _run_admitted(
         observation_policy=handler.observation_policy,
     )
     init_resource_cleanup_state(context)
+    context._resource_residency_binding = (config, owner)
+    context._resource_retention_requested = False
     cancellation_watch: asyncio.Task[bool] | None = None
     try:
         try:
@@ -365,6 +374,7 @@ async def _run_admitted(
                 else None
             )
         except Exception:
+            await _retry(lambda: _release_active_resource(config, owner), config)
             await _retry(
                 lambda: config.admission.release_acknowledged_cleanup(owner), config
             )
@@ -402,6 +412,14 @@ async def _run_admitted(
             returned = False
             exception = caught
         cleanup_failed = resource_cleanup_failed_reason(context)
+        if not returned and config.coordinator is not None:
+            try:
+                await config.coordinator.residency.clean_active(owner)
+                if context._resource_retention_requested:
+                    context.acknowledge_resource_cleanup()
+            except Exception as cleanup_error:
+                context.resource_cleanup_failed(str(cleanup_error))
+                cleanup_failed = str(cleanup_error)
         cleaned = (
             (returned or resource_cleanup_acknowledged(context))
             and cleanup_failed is None
@@ -487,11 +505,17 @@ async def _run_admitted(
                     exception, code=getattr(exception, "code", "invalid_result")
                 )
                 state = JobState.FAILED
-        released = await _retry(
-            lambda: config.admission.release_resource_after_cleanup(owner), config
-        )
-        if released.outcome is not ReleaseOutcome.RELEASED:
-            raise ResourceStaleOperationError("Resource release token is stale")
+        retained = state is JobState.COMPLETED and context._resource_retention_requested and config.coordinator is not None
+        if retained:
+            await _retry(lambda: config.coordinator.residency.park(config, owner), config)
+        else:
+            if config.coordinator is not None:
+                await config.coordinator.residency.clean_active(owner)
+            released = await _retry(
+                lambda: config.admission.release_resource_after_cleanup(owner), config
+            )
+            if released.outcome is not ReleaseOutcome.RELEASED:
+                raise ResourceStaleOperationError("Resource release token is stale")
         retry = (
             state is JobState.FAILED
             and exception is not None
@@ -550,6 +574,8 @@ async def _run_admitted(
             else None,
         )
         await _retry(lambda: config.admission.finalize_execution_claim(owner), config)
+        if retained:
+            config.coordinator.residency.completed(owner)
         await _terminal(handler, item)
     finally:
         if cancellation_watch is not None:

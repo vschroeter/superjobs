@@ -30,6 +30,11 @@ class RuntimeResources:
     async def snapshot(self) -> AdmissionSnapshot:
         return await self._admission.snapshot()
 
+    async def request_release(self, resource_key: str) -> bool:
+        """Request cooperative retained-resource teardown without revoking its owner."""
+        return await self._admission.request_release(resource_key)
+
+
     async def waiting_executions(
         self,
         *,

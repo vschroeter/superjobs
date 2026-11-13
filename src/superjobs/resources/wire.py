@@ -137,6 +137,11 @@ def encode_resource(
         body["unavailable_reason"] = record.unavailable_reason.value
     if record.reason_detail is not None:
         body["reason_detail"] = record.reason_detail
+    if record.retained or record.residency_key or record.release_requested:
+        # Old consumers must fail closed instead of dropping retained ownership.
+        body.update(wire_version=2, retained=record.retained,
+                    residency_key=record.residency_key,
+                    release_requested=record.release_requested)
     encoded = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
     if len(encoded) > config.max_record_bytes:
         raise ResourceValidationError("resource record exceeds configured size limit")
@@ -148,7 +153,7 @@ def decode_resource(payload: bytes) -> StoredResourceRecord:
         body = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ResourceValidationError("resource record is not valid JSON") from error
-    if body.get("wire_version") != WIRE_VERSION:
+    if body.get("wire_version") not in {WIRE_VERSION, 2}:
         raise ResourceValidationError("unsupported resource record wire version")
     owner_payload = body.get("owner")
     owner = _decode_owner(owner_payload) if owner_payload is not None else None
@@ -177,6 +182,9 @@ def decode_resource(payload: bytes) -> StoredResourceRecord:
             reason_detail=body.get("reason_detail"),
             heartbeat_at=heartbeat_at,
             updated_at=_decode_datetime(body["updated_at"], field="updated_at"),
+            retained=body.get("retained", False),
+            residency_key=body.get("residency_key"),
+            release_requested=body.get("release_requested", False),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise ResourceValidationError("resource record is malformed") from error

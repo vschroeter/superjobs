@@ -136,6 +136,57 @@ result = await jobs.resources.resolve_terminated_incarnation(confirmation)
 
 Validate evidence in application code before trusting it.
 
+## Retaining a prepared resource between jobs
+
+Resource-bound handlers can opt into worker-owned residency. Default handler
+cleanup behavior is unchanged. No model initialization runs before admission.
+
+```python
+reused = await context.prepare_resource(
+    model_snapshot_key, load_model, unload_model, idle_timeout=30,
+)
+return await infer(request)
+```
+
+`load_model` and `unload_model` are asynchronous zero-argument callbacks owned by
+the application. The key identifies all state required for compatible reuse.
+`prepare_resource` confirms the current admission, unloads a different model
+before loading its replacement, and returns whether loading was avoided.
+The application must drain native threads before its callbacks finish.
+`context.release_resource()` explicitly cleans resident state during an admitted
+invocation. `context.resource_reused(key)` and `context.retain_resource(key,
+cleanup, idle_timeout=30)` support applications that manage preparation themselves.
+
+A successful Job result and its execution claim can finish while the resource
+record remains **owned**, marked `retained`, with its last owner token and
+`residency_key`. No cleanup acknowledgement or available interval is fabricated.
+The next compatible invocation on the same worker incarnation receives a new
+execution claim and a CAS-fenced owner generation before entering its callback.
+Residency is not a persistent Job. A retained reservation may refer to the last
+completed Job; that Job is no longer running.
+
+Idle time is measured locally after durable completion and claim finalization.
+The allowed idle timeout is greater than zero and at most 300 seconds. Expiry
+requests cleanup; it never authorizes a takeover. A competing resource claimant
+or `await jobs.resources.request_release(resource_key)` requests cooperative
+release. The worker unloads after an active call drains and before releasing the
+reservation. This provides bounded idle reuse, not a new global queue scheduler
+or preemption of native inference. Different local handler bindings also clean
+up before entry. Shutdown drains resident cleanup before the transport closes.
+
+Cleanup failure keeps unavailable ownership and withdraws readiness. Broker
+uncertainty disables reuse, initiates idle cleanup, and retains durable ownership
+until release can be confirmed. Confirmed incarnation termination resolves both
+ordinary and retained reservations. Stale handoff and release tokens cannot
+clear a newer owner. Model loads, calls and teardown remain application-specific.
+
+Retained resource records use wire version 2; ordinary records remain version 1.
+New readers accept both. Old readers reject retained records, so upgrade every
+controller, worker, offline probe and resource observer sharing the namespace
+before enabling retention. Do not enable it in a mixed rollout. Applications
+must distinguish completed execution from physical resource release in their
+own receipts and must request idle release before stopping a worker process.
+
 ## Typing consumers
 
 Pyright **1.1.414**, `basic`, static **3.12**:

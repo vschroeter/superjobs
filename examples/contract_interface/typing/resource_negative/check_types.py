@@ -24,6 +24,15 @@ DEVICE_KEY = "sample-host.gpu0"
 _VALID_RESOURCES = {DEVICE_KEY: 1}
 
 
+async def _wrong_residency(context: JobContext[None], jobs: SuperJobs) -> None:
+    def synchronous_cleanup() -> None:
+        pass
+
+    context.retain_resource("model", synchronous_cleanup)  # expect: reportArgumentType
+    context.resource_reused(123)  # expect: reportArgumentType
+    await jobs.resources.request_release(123)  # expect: reportArgumentType
+
+
 def _wrong_exclusive_requirement_mapping() -> None:
     parse_exclusive_resource_requirement({"host.gpu0": "1"})  # expect: reportArgumentType
 

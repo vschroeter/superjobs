@@ -35,6 +35,7 @@ from superjobs.resources.models import (
     UnavailableReason,
 )
 from superjobs.resources.store import CasStatus, ResourceAdmissionStore
+from superjobs.resources.residency_admission import RetainedAdmissionMixin
 
 if TYPE_CHECKING:
     from superjobs.resources.config import ResourceAdmissionConfig
@@ -66,7 +67,7 @@ def _same_acquire_intent(left: AdmissionOwner, right: AdmissionOwner) -> bool:
     )
 
 
-class ResourceAdmission:
+class ResourceAdmission(RetainedAdmissionMixin):
     """Broker-backed exclusive resource and execution-attempt admission (v1)."""
 
     def __init__(
@@ -173,6 +174,8 @@ class ResourceAdmission:
 
         current_resource, _ = await self._store.read_resource(intent.resource_key)
         if current_resource is not None:
+            if current_resource.residency_key and current_resource.owner is not None:
+                await self.request_release(intent.resource_key)
             if current_resource.availability is ResourceAvailability.UNAVAILABLE:
                 return AcquireResult(
                     outcome=AcquisitionOutcome.UNAVAILABLE,
@@ -642,6 +645,7 @@ class ResourceAdmission:
             resource is not None
             and resource.owner is not None
             and _owners_match(resource.owner, owner)
+            and not resource.retained
         ):
             return ReleaseResult(outcome=ReleaseOutcome.STALE, resource=resource)
         claim, claim_revision = await self._store.read_execution_claim(
@@ -651,7 +655,8 @@ class ResourceAdmission:
             return ReleaseResult(outcome=ReleaseOutcome.FINALIZED)
         if not _owners_match(claim.owner, owner):
             return ReleaseResult(outcome=ReleaseOutcome.STALE)
-        if not claim.resource_released:
+        detached = resource is not None and resource.owner == owner and resource.retained
+        if not claim.resource_released and not detached:
             return ReleaseResult(outcome=ReleaseOutcome.STALE)
         applied = await self._store.delete_execution_claim_if_owner(
             owner.execution_id,

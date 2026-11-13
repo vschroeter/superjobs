@@ -1,0 +1,3 @@
+# Resource residency outlives completed executions
+
+Following the owner's request in [issue #75](https://github.com/vschroeter/superjobs/issues/75), a worker may explicitly retain prepared state under continuous resource ownership after a Job execution finishes, with each following invocation acquiring its own execution claim and a fenced reservation handoff. This separates execution completion from physical cleanup instead of inventing a persistent Job, accepting that failed cleanup keeps the device unavailable until acknowledged cleanup or confirmed termination. Retained records use wire version 2 so older participants fail closed, requiring coordinated deployment before enabling retention while ordinary reservations keep version 1.
